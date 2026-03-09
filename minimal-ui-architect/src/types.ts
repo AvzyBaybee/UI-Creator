@@ -7,6 +7,8 @@ export interface BaseElement {
   parentId?: string;
   type: ElementType;
   depth: number;
+  nodeX: number;
+  nodeY: number;
 }
 
 export interface Rectangle extends BaseElement {
@@ -18,7 +20,6 @@ export interface Rectangle extends BaseElement {
   fill: string;
   stroke: string;
   strokeWidth: number;
-  depth: number;
   cornerRadius: number;
   highlightColor: string;
 }
@@ -26,8 +27,11 @@ export interface Rectangle extends BaseElement {
 export interface GroupData extends BaseElement {
   type: 'group';
   expanded: boolean;
+  nodeWidth: number;
+  nodeHeight: number;
+  color: string;
 }
 
 export type CanvasElement = Rectangle | GroupData;
 
-export type Tool = 'select' | 'rectangle';
+export type Tool = 'select' | 'rectangle' | 'zone' | 'hand' | 'zoom';
