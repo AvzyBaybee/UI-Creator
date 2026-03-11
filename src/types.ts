@@ -23,6 +23,7 @@ export interface TileData extends BaseElement {
   cornerRadius: number;
   highlightColor: string;
   colorTileId?: string;
+  gradientTileId?: string;
   cableClips?: { id: string; x: number; y: number }[];
 }
 
@@ -51,6 +52,7 @@ export interface GradientTileData extends BaseElement {
   y: number;
   width: number;
   height: number;
+  cornerRadius: number;
   gradientType: 'linear' | 'radial';
   scale: number;
   angle: number;
@@ -58,9 +60,8 @@ export interface GradientTileData extends BaseElement {
   positionY: number;
   colorStops: { id: string, color: string, opacity: number, position: number }[];
   highlightColor: string;
-  cornerRadius: number;
 }
 
 export type CanvasElement = TileData | GroupData | ColorTileData | GradientTileData;
 
-export type Tool = 'select' | 'tile' | 'group' | 'hand' | 'zoom' | 'gradient';
+export type Tool = 'select' | 'tile' | 'group' | 'hand' | 'zoom';

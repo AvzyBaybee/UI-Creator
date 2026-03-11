@@ -3,7 +3,7 @@ import { getTextShadow } from '../utils/ui';
 
 export const ColorRow = ({ label, value, onChange, onCommit, min, max, textScale, textStroke, highlightColor, onInteractionStart, onInteractionEnd, precision = 0, innerGap = 8, labelWidth = 16 }: any) => {
   const [isEditing, setIsEditing] = useState(false);
-  const [inputValue, setInputValue] = useState(value.toString());
+  const [inputValue, setInputValue] = useState(value?.toString() ?? "");
   const isDragging = useRef(false); const startVal = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);

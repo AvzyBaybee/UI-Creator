@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS = {
   textStroke: 1.5,
   tileWidth: 192,
   colorTileWidth: 192,
+  gradientTileWidth: 192,
   handleHeight: 32,
   handleY: -12,
   rowPaddingX: 12,
@@ -39,7 +40,8 @@ export const DEFAULT_SETTINGS = {
   groupHandleHeight: 32,
   groupHandleY: -12,
   groupHandleX: 0,
-  groupHandleWidthPercent: 100,
+  groupHandleWidth: 200,
   groupDefaultOpacity: 1,
-  handleCutoutRoundness: 0
+  handleCutoutRoundness: 0,
+  handleCutoutWidth: 60
 };

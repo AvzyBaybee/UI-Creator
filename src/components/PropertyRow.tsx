@@ -3,7 +3,7 @@ import { getTextShadow } from '../utils/ui';
 
 export const PropertyRow = ({ label, value, onChange, onCommit, min, max, textScale, textStroke, tooltip, showTooltip, hideTooltip, onInteractionStart, onInteractionEnd, precision = 0, innerGap = 8, textColor = 'white' }: any) => {
   const [isEditing, setIsEditing] = useState(false);
-  const [inputValue, setInputValue] = useState(value.toString());
+  const [inputValue, setInputValue] = useState(value?.toString() ?? "");
   const isDragging = useRef(false);
   const startVal = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);

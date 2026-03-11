@@ -54,6 +54,7 @@ export default function App() {
   const [stageScale, setStageScale] = useState(1); const [isDrawing, setIsDrawing] = useState(false);
   const [isDrawingGroup, setIsDrawingGroup] = useState(false); const [isSelecting, setIsSelecting] = useState(false);
   const [isZooming, setIsZooming] = useState(false); const [drawingCable, setDrawingCable] = useState<any>(null);
+  const [hoveredInputSocketId, setHoveredInputSocketId] = useState<string | null>(null);
   const [hoveredCable, setHoveredCable] = useState<any>(null); const [draggingClip, setDraggingClip] = useState<any>(null);
   const [selectionStart, setSelectionStart] = useState<any>(null); const [selectionRect, setSelectionRect] = useState<any>(null);
   const [newTileStart, setNewTileStart] = useState<any>(null); const [currentDrawingTile, setCurrentDrawingTile] = useState<any>(null);
@@ -204,14 +205,10 @@ export default function App() {
     const isBackground = e.target === stage || e.target.name() === 'bg-rect' || e.target.name() === 'grid-rect';
 
     if (tool === 'zoom') { setIsZooming(true); zoomStartRef.current = { clientX: e.evt.clientX, scale: stageScale, mousePointTo: worldPos }; }
-    else if ((tool === 'tile' || tool === 'gradient') && isBackground) {
+    else if (tool === 'tile' && isBackground) {
       setIsDrawing(true); setNewTileStart(roundedWorldPos);
       const highlightColor = getDistinctColor();
-      if (tool === 'gradient') {
-        setCurrentDrawingTile({ id: `gradient-temp`, name: '', type: 'gradient', x: roundedWorldPos.x, y: roundedWorldPos.y, width: 0, height: 0, tileX: roundedWorldPos.x, tileY: roundedWorldPos.y, visible: true, depth: elements.length + 1, cornerRadius: 0, highlightColor, gradientType: 'linear', scale: 100, angle: 90, positionX: 0, positionY: 0, colorStops: [{ id: 'stop-1', color: '#ffffff', opacity: 100, position: 0 }, { id: 'stop-2', color: '#000000', opacity: 100, position: 100 }] });
-      } else {
-        setCurrentDrawingTile({ id: `tile-temp`, name: '', type: 'tile', x: roundedWorldPos.x, y: roundedWorldPos.y, width: 0, height: 0, tileX: roundedWorldPos.x, tileY: roundedWorldPos.y, fill: '#808080', stroke: 'transparent', strokeWidth: 0, visible: true, depth: elements.length + 1, cornerRadius: 0, highlightColor });
-      }
+      setCurrentDrawingTile({ id: `tile-temp`, name: '', type: 'tile', x: roundedWorldPos.x, y: roundedWorldPos.y, width: 0, height: 0, tileX: roundedWorldPos.x, tileY: roundedWorldPos.y, fill: '#808080', stroke: 'transparent', strokeWidth: 0, visible: true, depth: elements.length + 1, cornerRadius: 0, highlightColor });
     } else if (tool === 'group' && isBackground) {
       setIsDrawingGroup(true); setNewTileStart(roundedWorldPos);
       setCurrentDrawingGroup({ id: `group-temp`, name: '', type: 'group', tileX: roundedWorldPos.x, tileY: roundedWorldPos.y, tileWidth: 0, tileHeight: 0, color: getDistinctColor(), opacity: settings.groupDefaultOpacity, expanded: true, visible: true, depth: elements.length + 1 });
@@ -248,12 +245,22 @@ export default function App() {
   };
 
   const handleStagePointerUp = () => {
-    if (drawingCable) setDrawingCable(null); if (draggingClip) { pushToHistory(elementsRef.current); setDraggingClip(null); }
+    if (drawingCable) {
+      if (hoveredInputSocketId) {
+        const source = elements.find(e => e.id === drawingCable.sourceId);
+        if (source?.type === 'color') {
+          handleUpdateEnd(hoveredInputSocketId, { colorTileId: drawingCable.sourceId, gradientTileId: undefined });
+        } else if (source?.type === 'gradient') {
+          handleUpdateEnd(hoveredInputSocketId, { gradientTileId: drawingCable.sourceId, colorTileId: undefined });
+        }
+      }
+      setDrawingCable(null);
+    }
+    if (draggingClip) { pushToHistory(elementsRef.current); setDraggingClip(null); }
     if (isZooming) { setIsZooming(false); zoomStartRef.current = null; }
     else if (isDrawing && currentDrawingTile) {
       if (currentDrawingTile.width > 5 && currentDrawingTile.height > 5) {
-        const isGradient = currentDrawingTile.type === 'gradient';
-        const finalTile = { ...currentDrawingTile, id: `${isGradient ? 'gradient' : 'tile'}-${Date.now()}`, name: `${isGradient ? 'Gradient' : 'Rectangle'} ${elements.length + 1}`, highlightColor: currentDrawingTile.highlightColor, tileX: currentDrawingTile.x + currentDrawingTile.width + 40, tileY: currentDrawingTile.y };
+        const finalTile = { ...currentDrawingTile, id: `tile-${Date.now()}`, name: `Rectangle ${elements.length + 1}`, highlightColor: currentDrawingTile.highlightColor, tileX: currentDrawingTile.x + currentDrawingTile.width + 40, tileY: currentDrawingTile.y };
         pushToHistory([...elements, finalTile]); setSelectedIds([finalTile.id]);
       }
       setIsDrawing(false); setNewTileStart(null); setCurrentDrawingTile(null);
@@ -450,8 +457,9 @@ export default function App() {
   };
 
   const groups = useMemo(() => elements.filter(e => e.type === 'group') as GroupData[], [elements]);
-  const tiles = useMemo(() => elements.filter(e => e.type === 'tile' || e.type === 'gradient') as (TileData | GradientTileData)[], [elements]);
+  const tiles = useMemo(() => elements.filter(e => e.type === 'tile') as TileData[], [elements]);
   const colorTiles = useMemo(() => elements.filter(e => e.type === 'color') as ColorTileData[], [elements]);
+  const gradientTiles = useMemo(() => elements.filter(e => e.type === 'gradient') as GradientTileData[], [elements]);
 
   const handleRename = (id: string, name: string) => {
     handleUpdateEnd(id, { name });
@@ -569,17 +577,18 @@ export default function App() {
             )}
             {tiles.sort((a,b)=>(a.depth||0)-(b.depth||0)).map((tile) => {
               const colorTile = elements.find(e => e.id === tile.colorTileId) as ColorTileData | undefined;
-              const fill = colorTile ? getColorHex(colorTile) : (tile.type === 'tile' ? tile.fill : undefined);
-              const showHighlight = (selectedIds.includes(tile.id) || hoveredTileId === tile.id || (hoveredTileId && hoveredTileId === tile.colorTileId) || isSettingsOpen) && transformingTile?.id !== tile.id && interactingId !== tile.id;
+              const gradientTile = elements.find(e => e.id === tile.gradientTileId) as GradientTileData | undefined;
+              const fill = colorTile ? getColorHex(colorTile) : tile.fill;
+              const showHighlight = (selectedIds.includes(tile.id) || hoveredTileId === tile.id || (hoveredTileId && hoveredTileId === tile.colorTileId) || (hoveredTileId && hoveredTileId === tile.gradientTileId) || isSettingsOpen) && transformingTile?.id !== tile.id && interactingId !== tile.id;
               
               let gradientProps = {};
-              if (tile.type === 'gradient') {
-                const gt = tile as GradientTileData;
-                const stops = gt.colorStops.sort((a,b)=>a.position-b.position).flatMap(s => [s.position / 100, hexToRgba(s.color, s.opacity / 100)]);
+              if (gradientTile) {
+                const gt = gradientTile;
+                const stops = [...gt.colorStops].sort((a,b)=>a.position-b.position).flatMap(s => [s.position / 100, hexToRgba(s.color, s.opacity / 100)]);
                 const rad = (gt.angle - 90) * Math.PI / 180;
-                const cx = gt.width / 2 + gt.positionX;
-                const cy = gt.height / 2 + gt.positionY;
-                const r = Math.max(gt.width, gt.height) * (gt.scale / 100) / 2;
+                const cx = tile.width / 2 + gt.positionX;
+                const cy = tile.height / 2 + gt.positionY;
+                const r = Math.max(tile.width, tile.height) * (gt.scale / 100) / 2;
                 
                 if (gt.gradientType === 'linear') {
                   gradientProps = {
@@ -869,10 +878,10 @@ export default function App() {
               </motion.div>
             );
           })}
-          {[...colorTiles, ...tiles].map(el => {
+          {[...colorTiles, ...gradientTiles, ...tiles].map(el => {
             const theme = getThemeColor((el as any).highlightColor || '#3b82f6', settings);
             const isSelected = selectedIds.includes(el.id);
-            const elWidth = el.type === 'color' ? settings.colorTileWidth : settings.tileWidth;
+            const elWidth = el.type === 'color' ? settings.colorTileWidth : (el.type === 'gradient' ? settings.gradientTileWidth : settings.tileWidth);
             const elHeight = tileHeightsRef.current[el.id] || 200;
             const nameBarBottom = 40;
             const socketYOffset = nameBarBottom + (elHeight - nameBarBottom) / 2;
@@ -943,12 +952,16 @@ export default function App() {
                           </>
                         ) : (
                           <>
-                            <PropertyRow innerGap={settings.innerGap} textScale={settings.textScale} textStroke={settings.textStroke} label="Width" value={(el as any).width} min={0} onChange={(v:any, d:number)=>handleBulkRelativeUpdate(isSelected?selectedIds:[el.id], e => ({width: Math.max(0, (e as any).width + d)}))} onCommit={(v:any, isManual:boolean)=> isManual ? handleBulkUpdateEnd(isSelected?selectedIds:[el.id],{width:v}) : pushToHistory(elementsRef.current)} tooltip={TOOLTIPS.width} showTooltip={showTooltip} hideTooltip={hideTooltip} onInteractionStart={()=>setInteractingId(el.id)} onInteractionEnd={()=>setInteractingId(null)} />
-                            <PropertyRow innerGap={settings.innerGap} textScale={settings.textScale} textStroke={settings.textStroke} label="Height" value={(el as any).height} min={0} onChange={(v:any, d:number)=>handleBulkRelativeUpdate(isSelected?selectedIds:[el.id], e => ({height: Math.max(0, (e as any).height + d)}))} onCommit={(v:any, isManual:boolean)=> isManual ? handleBulkUpdateEnd(isSelected?selectedIds:[el.id],{height:v}) : pushToHistory(elementsRef.current)} tooltip={TOOLTIPS.height} showTooltip={showTooltip} hideTooltip={hideTooltip} onInteractionStart={()=>setInteractingId(el.id)} onInteractionEnd={()=>setInteractingId(null)} />
-                            <PropertyRow innerGap={settings.innerGap} textScale={settings.textScale} textStroke={settings.textStroke} label="Up/Down" value={(el as any).y} min={-9999} max={9999} onChange={(v:any, d:number)=>handleBulkRelativeUpdate(isSelected?selectedIds:[el.id], e => ({y: (e as any).y + d}))} onCommit={(v:any, isManual:boolean)=> isManual ? handleBulkUpdateEnd(isSelected?selectedIds:[el.id],{y:v}) : pushToHistory(elementsRef.current)} tooltip={TOOLTIPS.upDown} showTooltip={showTooltip} hideTooltip={hideTooltip} onInteractionStart={()=>setInteractingId(el.id)} onInteractionEnd={()=>setInteractingId(null)} />
-                            <PropertyRow innerGap={settings.innerGap} textScale={settings.textScale} textStroke={settings.textStroke} label="Left/Right" value={(el as any).x} min={-9999} max={9999} onChange={(v:any, d:number)=>handleBulkRelativeUpdate(isSelected?selectedIds:[el.id], e => ({x: (e as any).x + d}))} onCommit={(v:any, isManual:boolean)=> isManual ? handleBulkUpdateEnd(isSelected?selectedIds:[el.id],{x:v}) : pushToHistory(elementsRef.current)} tooltip={TOOLTIPS.leftRight} showTooltip={showTooltip} hideTooltip={hideTooltip} onInteractionStart={()=>setInteractingId(el.id)} onInteractionEnd={()=>setInteractingId(null)} />
-                            <PropertyRow innerGap={settings.innerGap} textScale={settings.textScale} textStroke={settings.textStroke} label="Depth" value={(el as any).depth} min={0} max={999999} onChange={(v:any, d:number)=>handleBulkRelativeUpdate(isSelected?selectedIds:[el.id], e => ({depth: Math.max(0, (e as any).depth + d)}))} onCommit={(v:any, isManual:boolean)=> isManual ? handleBulkUpdateEnd(isSelected?selectedIds:[el.id],{depth:v}) : pushToHistory(elementsRef.current)} tooltip={TOOLTIPS.depth} showTooltip={showTooltip} hideTooltip={hideTooltip} onInteractionStart={()=>setInteractingId(el.id)} onInteractionEnd={()=>setInteractingId(null)} />
-                            <PropertyRow innerGap={settings.innerGap} textScale={settings.textScale} textStroke={settings.textStroke} label="Corner Roundness" value={(el as any).cornerRadius} min={0} max={Math.min((el as any).width,(el as any).height)/2} onChange={(v:any, d:number)=>handleBulkRelativeUpdate(isSelected?selectedIds:[el.id], e => ({cornerRadius: Math.max(0, (e as any).cornerRadius + d)}))} onCommit={(v:any, isManual:boolean)=> isManual ? handleBulkUpdateEnd(isSelected?selectedIds:[el.id],{cornerRadius:v}) : pushToHistory(elementsRef.current)} tooltip={TOOLTIPS.cornerRoundness} showTooltip={showTooltip} hideTooltip={hideTooltip} onInteractionStart={()=>setInteractingId(el.id)} onInteractionEnd={()=>setInteractingId(null)} />
+                            {el.type === 'tile' && (
+                              <>
+                                <PropertyRow innerGap={settings.innerGap} textScale={settings.textScale} textStroke={settings.textStroke} label="Width" value={(el as any).width} min={0} onChange={(v:any, d:number)=>handleBulkRelativeUpdate(isSelected?selectedIds:[el.id], e => ({width: Math.max(0, (e as any).width + d)}))} onCommit={(v:any, isManual:boolean)=> isManual ? handleBulkUpdateEnd(isSelected?selectedIds:[el.id],{width:v}) : pushToHistory(elementsRef.current)} tooltip={TOOLTIPS.width} showTooltip={showTooltip} hideTooltip={hideTooltip} onInteractionStart={()=>setInteractingId(el.id)} onInteractionEnd={()=>setInteractingId(null)} />
+                                <PropertyRow innerGap={settings.innerGap} textScale={settings.textScale} textStroke={settings.textStroke} label="Height" value={(el as any).height} min={0} onChange={(v:any, d:number)=>handleBulkRelativeUpdate(isSelected?selectedIds:[el.id], e => ({height: Math.max(0, (e as any).height + d)}))} onCommit={(v:any, isManual:boolean)=> isManual ? handleBulkUpdateEnd(isSelected?selectedIds:[el.id],{height:v}) : pushToHistory(elementsRef.current)} tooltip={TOOLTIPS.height} showTooltip={showTooltip} hideTooltip={hideTooltip} onInteractionStart={()=>setInteractingId(el.id)} onInteractionEnd={()=>setInteractingId(null)} />
+                                <PropertyRow innerGap={settings.innerGap} textScale={settings.textScale} textStroke={settings.textStroke} label="Up/Down" value={(el as any).y} min={-9999} max={9999} onChange={(v:any, d:number)=>handleBulkRelativeUpdate(isSelected?selectedIds:[el.id], e => ({y: (e as any).y + d}))} onCommit={(v:any, isManual:boolean)=> isManual ? handleBulkUpdateEnd(isSelected?selectedIds:[el.id],{y:v}) : pushToHistory(elementsRef.current)} tooltip={TOOLTIPS.upDown} showTooltip={showTooltip} hideTooltip={hideTooltip} onInteractionStart={()=>setInteractingId(el.id)} onInteractionEnd={()=>setInteractingId(null)} />
+                                <PropertyRow innerGap={settings.innerGap} textScale={settings.textScale} textStroke={settings.textStroke} label="Left/Right" value={(el as any).x} min={-9999} max={9999} onChange={(v:any, d:number)=>handleBulkRelativeUpdate(isSelected?selectedIds:[el.id], e => ({x: (e as any).x + d}))} onCommit={(v:any, isManual:boolean)=> isManual ? handleBulkUpdateEnd(isSelected?selectedIds:[el.id],{x:v}) : pushToHistory(elementsRef.current)} tooltip={TOOLTIPS.leftRight} showTooltip={showTooltip} hideTooltip={hideTooltip} onInteractionStart={()=>setInteractingId(el.id)} onInteractionEnd={()=>setInteractingId(null)} />
+                                <PropertyRow innerGap={settings.innerGap} textScale={settings.textScale} textStroke={settings.textStroke} label="Depth" value={(el as any).depth} min={0} max={999999} onChange={(v:any, d:number)=>handleBulkRelativeUpdate(isSelected?selectedIds:[el.id], e => ({depth: Math.max(0, (e as any).depth + d)}))} onCommit={(v:any, isManual:boolean)=> isManual ? handleBulkUpdateEnd(isSelected?selectedIds:[el.id],{depth:v}) : pushToHistory(elementsRef.current)} tooltip={TOOLTIPS.depth} showTooltip={showTooltip} hideTooltip={hideTooltip} onInteractionStart={()=>setInteractingId(el.id)} onInteractionEnd={()=>setInteractingId(null)} />
+                                <PropertyRow innerGap={settings.innerGap} textScale={settings.textScale} textStroke={settings.textStroke} label="Corner Roundness" value={(el as any).cornerRadius} min={0} max={Math.min((el as any).width,(el as any).height)/2} onChange={(v:any, d:number)=>handleBulkRelativeUpdate(isSelected?selectedIds:[el.id], e => ({cornerRadius: Math.max(0, (e as any).cornerRadius + d)}))} onCommit={(v:any, isManual:boolean)=> isManual ? handleBulkUpdateEnd(isSelected?selectedIds:[el.id],{cornerRadius:v}) : pushToHistory(elementsRef.current)} tooltip={TOOLTIPS.cornerRoundness} showTooltip={showTooltip} hideTooltip={hideTooltip} onInteractionStart={()=>setInteractingId(el.id)} onInteractionEnd={()=>setInteractingId(null)} />
+                              </>
+                            )}
                             {el.type === 'gradient' && (
                               <>
                                 <div className="w-full h-px bg-white/10 my-1" />
@@ -979,70 +992,150 @@ export default function App() {
                                     handleUpdateEnd(el.id, { colorStops: newStops });
                                   }}
                                 >
-                                  {(el as any).colorStops.map((stop: any, idx: number) => (
-                                    <div key={stop.id} className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-white shadow-md cursor-ew-resize" style={{ left: `calc(${stop.position}% - 8px)`, backgroundColor: stop.color, zIndex: selectedGradientStopId === stop.id ? 10 : 1, outline: selectedGradientStopId === stop.id ? '2px solid #3b82f6' : 'none' }}
-                                      onPointerDown={(e) => {
-                                        e.stopPropagation();
-                                        setSelectedGradientStopId(stop.id);
-                                        const startX = e.clientX;
-                                        const startPos = stop.position;
-                                        const parentWidth = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect().width;
-                                        const handleMove = (me: PointerEvent) => {
-                                          const dx = me.clientX - startX;
-                                          const newPos = Math.max(0, Math.min(100, startPos + (dx / parentWidth) * 100));
+                                  {(el as any).colorStops.map((stop: any) => (
+                                    <React.Fragment key={stop.id}>
+                                      <input 
+                                        id={`color-picker-${el.id}-${stop.id}`}
+                                        type="color" 
+                                        style={{ display: 'none' }}
+                                        value={stop.color} 
+                                        onChange={(e) => {
                                           const newStops = [...(el as any).colorStops];
-                                          const stopIndex = newStops.findIndex(s => s.id === stop.id);
-                                          if (stopIndex !== -1) {
-                                            newStops[stopIndex] = { ...stop, position: newPos };
-                                            handleUpdate(el.id, { colorStops: newStops });
+                                          const idx = newStops.findIndex(s => s.id === stop.id);
+                                          if (idx !== -1) { 
+                                            newStops[idx] = { ...newStops[idx], color: e.target.value }; 
+                                            handleUpdateEnd(el.id, { colorStops: newStops }); 
                                           }
-                                        };
-                                        const handleUp = () => {
-                                          window.removeEventListener('pointermove', handleMove);
-                                          window.removeEventListener('pointerup', handleUp);
-                                          pushToHistory(elementsRef.current);
-                                        };
-                                        window.addEventListener('pointermove', handleMove);
-                                        window.addEventListener('pointerup', handleUp);
-                                      }}
-                                    />
+                                        }} 
+                                      />
+                                      <div className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-white shadow-md cursor-ew-resize" style={{ left: `calc(${stop.position}% - 8px)`, backgroundColor: stop.color, zIndex: selectedGradientStopId === stop.id ? 10 : 1, outline: selectedGradientStopId === stop.id ? '2px solid #3b82f6' : 'none' }}
+                                        onPointerDown={(e) => {
+                                          e.stopPropagation();
+                                          setSelectedGradientStopId(stop.id);
+                                          const startX = e.clientX;
+                                          const startPos = stop.position;
+                                          const startTime = Date.now();
+                                          let moved = false;
+                                          const parentWidth = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect().width;
+                                          const handleMove = (me: PointerEvent) => {
+                                            const dx = me.clientX - startX;
+                                            if (Math.abs(dx) > 2) moved = true;
+                                            const newPos = Math.max(0, Math.min(100, startPos + (dx / parentWidth) * 100));
+                                            const newStops = [...(el as any).colorStops];
+                                            const stopIndex = newStops.findIndex(s => s.id === stop.id);
+                                            if (stopIndex !== -1) {
+                                              newStops[stopIndex] = { ...stop, position: newPos };
+                                              handleUpdate(el.id, { colorStops: newStops });
+                                            }
+                                          };
+                                          const handleUp = () => {
+                                            window.removeEventListener('pointermove', handleMove);
+                                            window.removeEventListener('pointerup', handleUp);
+                                            if (!moved && (Date.now() - startTime) < 300) {
+                                              document.getElementById(`color-picker-${el.id}-${stop.id}`)?.click();
+                                            }
+                                            pushToHistory(elementsRef.current);
+                                          };
+                                          window.addEventListener('pointermove', handleMove);
+                                          window.addEventListener('pointerup', handleUp);
+                                        }}
+                                      />
+                                    </React.Fragment>
                                   ))}
                                 </div>
-                                {selectedGradientStopId && (el as any).colorStops.find((s:any) => s.id === selectedGradientStopId) && (
-                                  <div className="flex items-center gap-2 mt-2">
-                                    <input type="color" value={(el as any).colorStops.find((s:any) => s.id === selectedGradientStopId).color} onChange={(e) => {
-                                      const newStops = [...(el as any).colorStops];
-                                      const idx = newStops.findIndex(s => s.id === selectedGradientStopId);
-                                      if (idx !== -1) { newStops[idx] = { ...newStops[idx], color: e.target.value }; handleUpdateEnd(el.id, { colorStops: newStops }); }
-                                    }} className="w-6 h-6 rounded cursor-pointer" />
-                                    <div className="flex-1">
-                                      <PropertyRow innerGap={settings.innerGap} textScale={settings.textScale} textStroke={settings.textStroke} label="Opacity" value={(el as any).colorStops.find((s:any) => s.id === selectedGradientStopId).opacity} min={0} max={100} onChange={(v:any, d:number)=>{
-                                        const newStops = [...(el as any).colorStops];
-                                        const idx = newStops.findIndex(s => s.id === selectedGradientStopId);
-                                        if (idx !== -1) { newStops[idx] = { ...newStops[idx], opacity: Math.max(0, Math.min(100, newStops[idx].opacity + d)) }; handleUpdate(el.id, { colorStops: newStops }); }
-                                      }} onCommit={(v:any, isManual:boolean)=>{
-                                        if (isManual) {
+                                {selectedGradientStopId && (() => {
+                                  const selectedStop = (el as any).colorStops.find((s:any) => s.id === selectedGradientStopId);
+                                  if (!selectedStop) return null;
+                                  return (
+                                    <div className="flex flex-col gap-2 mt-2">
+                                      <PropertyRow 
+                                        innerGap={settings.innerGap} 
+                                        textScale={settings.textScale} 
+                                        textStroke={settings.textStroke} 
+                                        label="Location" 
+                                        value={Math.round(selectedStop.position)} 
+                                        min={0} 
+                                        max={100} 
+                                        onChange={(v:any, d:number)=>{
                                           const newStops = [...(el as any).colorStops];
                                           const idx = newStops.findIndex(s => s.id === selectedGradientStopId);
-                                          if (idx !== -1) { newStops[idx] = { ...newStops[idx], opacity: v }; handleUpdateEnd(el.id, { colorStops: newStops }); }
-                                        } else { pushToHistory(elementsRef.current); }
-                                      }} tooltip="Stop Opacity" showTooltip={showTooltip} hideTooltip={hideTooltip} />
+                                          if (idx !== -1) { 
+                                            newStops[idx] = { ...newStops[idx], position: Math.max(0, Math.min(100, newStops[idx].position + d)) }; 
+                                            handleUpdate(el.id, { colorStops: newStops }); 
+                                          }
+                                        }} 
+                                        onCommit={(v:any, isManual:boolean)=>{
+                                          if (isManual) {
+                                            const newStops = [...(el as any).colorStops];
+                                            const idx = newStops.findIndex(s => s.id === selectedGradientStopId);
+                                            if (idx !== -1) { 
+                                              newStops[idx] = { ...newStops[idx], position: v }; 
+                                              handleUpdateEnd(el.id, { colorStops: newStops }); 
+                                            }
+                                          } else { 
+                                            pushToHistory(elementsRef.current); 
+                                          }
+                                        }} 
+                                        tooltip="Stop Location (0-100)" 
+                                        showTooltip={showTooltip} 
+                                        hideTooltip={hideTooltip} 
+                                        onInteractionStart={()=>setInteractingId(el.id)} 
+                                        onInteractionEnd={()=>setInteractingId(null)}
+                                      />
+                                      <div className="flex items-center gap-2">
+                                        <div 
+                                          className="w-6 h-6 rounded border border-white/20 cursor-pointer" 
+                                          style={{ backgroundColor: selectedStop.color }}
+                                          onClick={() => document.getElementById(`color-picker-${el.id}-${selectedStop.id}`)?.click()}
+                                        />
+                                        <div className="flex-1">
+                                          <PropertyRow 
+                                            innerGap={settings.innerGap} 
+                                            textScale={settings.textScale} 
+                                            textStroke={settings.textStroke} 
+                                            label="Opacity" 
+                                            value={selectedStop.opacity} 
+                                            min={0} 
+                                            max={100} 
+                                            onChange={(v:any, d:number)=>{
+                                              const newStops = [...(el as any).colorStops];
+                                              const idx = newStops.findIndex(s => s.id === selectedGradientStopId);
+                                              if (idx !== -1) { 
+                                                newStops[idx] = { ...newStops[idx], opacity: Math.max(0, Math.min(100, newStops[idx].opacity + d)) }; 
+                                                handleUpdate(el.id, { colorStops: newStops }); 
+                                              }
+                                            }} 
+                                            onCommit={(v:any, isManual:boolean)=>{
+                                              if (isManual) {
+                                                const newStops = [...(el as any).colorStops];
+                                                const idx = newStops.findIndex(s => s.id === selectedGradientStopId);
+                                                if (idx !== -1) { 
+                                                  newStops[idx] = { ...newStops[idx], opacity: v }; 
+                                                  handleUpdateEnd(el.id, { colorStops: newStops }); 
+                                                }
+                                              } else { 
+                                                pushToHistory(elementsRef.current); 
+                                              }
+                                            }} 
+                                            tooltip="Stop Opacity" 
+                                            showTooltip={showTooltip} 
+                                            hideTooltip={hideTooltip} 
+                                            onInteractionStart={()=>setInteractingId(el.id)} 
+                                            onInteractionEnd={()=>setInteractingId(null)}
+                                          />
+                                        </div>
+                                        <button onClick={(e) => {
+                                          e.stopPropagation();
+                                          if ((el as any).colorStops.length > 2) {
+                                            const newStops = (el as any).colorStops.filter((s:any) => s.id !== selectedGradientStopId);
+                                            setSelectedGradientStopId(null);
+                                            handleUpdateEnd(el.id, { colorStops: newStops });
+                                          }
+                                        }} className="text-white/50 hover:text-red-400"><Trash2 size={14} /></button>
+                                      </div>
                                     </div>
-                                    <button onClick={(e) => {
-                                      e.stopPropagation();
-                                      if ((el as any).colorStops.length > 2) {
-                                        const newStops = (el as any).colorStops.filter((s:any) => s.id !== selectedGradientStopId);
-                                        setSelectedGradientStopId(null);
-                                        handleUpdateEnd(el.id, { colorStops: newStops });
-                                      }
-                                    }} className="text-white/50 hover:text-red-400"><Trash2 size={14} /></button>
-                                  </div>
-                                )}
-                                <button onClick={(e) => {
-                                  e.stopPropagation();
-                                  const newStops = [...(el as any).colorStops, { id: `stop-${Date.now()}`, color: '#ffffff', opacity: 100, position: 50 }];
-                                  handleUpdateEnd(el.id, { colorStops: newStops });
-                                }} className="mt-1 w-full py-1 bg-white/10 hover:bg-white/20 rounded text-xs text-white transition-colors">Add Color Stop</button>
+                                  );
+                                })()}
                               </>
                             )}
                           </>
@@ -1051,7 +1144,7 @@ export default function App() {
                     </div>
                   </div>
                   
-                  {el.type === 'color' ? (
+                  {el.type === 'color' || el.type === 'gradient' ? (
                     <div className="absolute w-6 h-6 rounded-full cursor-crosshair border-4 border-[#1a1a1a] z-50 hover:scale-110 transition-transform shadow-lg" 
                          style={{ right: -12, top: socketYOffset, transform: 'translateY(-50%)', backgroundColor: (el as any).highlightColor }} 
                          onMouseEnter={() => showTooltip(TOOLTIPS.socketOutput)} onMouseLeave={hideTooltip} 
@@ -1059,9 +1152,20 @@ export default function App() {
                   ) : (
                     <div className="absolute w-6 h-6 rounded-full cursor-crosshair border-4 border-[#1a1a1a] z-50 hover:scale-110 transition-transform shadow-lg" 
                          style={{ left: -12, top: socketYOffset, transform: 'translateY(-50%)', backgroundColor: (el as any).highlightColor || '#52525b' }} 
-                         onMouseEnter={() => showTooltip(TOOLTIPS.socketInput)} onMouseLeave={hideTooltip} 
-                         onPointerUp={(e) => { e.stopPropagation(); if (drawingCable) { handleUpdateEnd(el.id, { colorTileId: drawingCable.sourceId }); setDrawingCable(null); } }} 
-                         onPointerDown={(e) => { e.stopPropagation(); if ((el as any).colorTileId) handleUpdateEnd(el.id, { colorTileId: undefined }); }} />
+                         onMouseEnter={() => { showTooltip(TOOLTIPS.socketInput); setHoveredInputSocketId(el.id); }} onMouseLeave={() => { hideTooltip(); setHoveredInputSocketId(null); }} 
+                         onPointerUp={(e) => { 
+                           e.stopPropagation(); 
+                           if (drawingCable) { 
+                             const source = elements.find(e => e.id === drawingCable.sourceId);
+                             if (source?.type === 'color') {
+                               handleUpdateEnd(el.id, { colorTileId: drawingCable.sourceId, gradientTileId: undefined }); 
+                             } else if (source?.type === 'gradient') {
+                               handleUpdateEnd(el.id, { gradientTileId: drawingCable.sourceId, colorTileId: undefined }); 
+                             }
+                             setDrawingCable(null); 
+                           } 
+                         }} 
+                         onPointerDown={(e) => { e.stopPropagation(); if ((el as any).colorTileId || (el as any).gradientTileId) handleUpdateEnd(el.id, { colorTileId: undefined, gradientTileId: undefined }); }} />
                   )}
                 </div>
               </motion.div>
@@ -1074,8 +1178,41 @@ export default function App() {
         <motion.div initial={{ opacity: 0, scale: 0.9, y: -10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: -10 }} className="fixed z-[9999] bg-[#1a1a1a]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl p-2 w-48" style={{ left: Math.min(contextMenu.x, window.innerWidth - 200), top: Math.min(contextMenu.y, window.innerHeight - 200) }} onPointerDown={e => e.stopPropagation()} onContextMenu={e => e.preventDefault()}>
           <input autoFocus value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search tiles..." className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500 mb-2" />
           <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
-            {['Color'].filter(n => n.toLowerCase().includes(searchQuery.toLowerCase())).map(t => (
-              <button key={t} onClick={() => { const d = elements.length > 0 ? Math.max(...elements.map(el => el.depth || 0)) : 0; const n: ColorTileData = { id: `color-${Date.now()}`, name: `Color ${elements.length+1}`, type: 'color', tileX: contextMenu.worldX, tileY: contextMenu.worldY, visible: true, depth: Math.min(999999, d + 1), colorMode: 'HSB', channel1: Math.floor(Math.random() * 360), channel2: 80, channel3: 90, highlightColor: getDistinctColor() }; pushToHistory([...elements, n]); setContextMenu(null); }} className="text-left px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-blue-500/20 rounded-lg transition-colors">{t}</button>
+            {['Color', 'Gradient'].filter(n => n.toLowerCase().includes(searchQuery.toLowerCase())).map(t => (
+              <button key={t} onClick={() => { 
+                const d = elements.length > 0 ? Math.max(...elements.map(el => el.depth || 0)) : 0; 
+                if (t === 'Color') {
+                  const n: ColorTileData = { id: `color-${Date.now()}`, name: `Color ${elements.length+1}`, type: 'color', tileX: contextMenu.worldX, tileY: contextMenu.worldY, visible: true, depth: Math.min(999999, d + 1), colorMode: 'HSB', channel1: Math.floor(Math.random() * 360), channel2: 80, channel3: 90, highlightColor: getDistinctColor() }; 
+                  pushToHistory([...elements, n]); 
+                } else {
+                  const n: GradientTileData = { 
+                    id: `gradient-${Date.now()}`, 
+                    name: `Gradient ${elements.length+1}`, 
+                    type: 'gradient', 
+                    tileX: contextMenu.worldX, 
+                    tileY: contextMenu.worldY, 
+                    visible: true, 
+                    depth: Math.min(999999, d + 1), 
+                    x: 0,
+                    y: 0,
+                    width: 200,
+                    height: 100,
+                    cornerRadius: 0,
+                    gradientType: 'linear',
+                    scale: 100,
+                    angle: 90,
+                    positionX: 0,
+                    positionY: 0,
+                    colorStops: [
+                      { id: 'stop-1', color: '#000000', opacity: 100, position: 0 },
+                      { id: 'stop-2', color: '#ffffff', opacity: 100, position: 100 }
+                    ],
+                    highlightColor: getDistinctColor() 
+                  }; 
+                  pushToHistory([...elements, n]); 
+                }
+                setContextMenu(null); 
+              }} className="text-left px-3 py-2 text-sm text-zinc-300 hover:text-white hover:bg-blue-500/20 rounded-lg transition-colors">{t}</button>
             ))}
           </div>
         </motion.div>
@@ -1102,7 +1239,6 @@ export default function App() {
           <ToolButton icon={<ZoomIn size={settings.mainToolbarIconSize} />} label="Zoom (Z)" active={tool === 'zoom'} onClick={() => setTool('zoom')} />
           <div className="w-px h-6 bg-white/10 mx-1" />
           <ToolButton icon={<Square size={settings.mainToolbarIconSize} />} label="Rectangle (R)" active={tool === 'tile'} onClick={() => setTool('tile')} />
-          <ToolButton icon={<Palette size={settings.mainToolbarIconSize} />} label="Gradient (D)" active={tool === 'gradient'} onClick={() => setTool('gradient')} />
           <ToolButton icon={<FolderPlus size={settings.mainToolbarIconSize} />} label="Group (G)" active={tool === 'group'} onClick={() => setTool('group')} />
           <div className="w-px h-6 bg-white/10 mx-1" />
           <ToolButton icon={<Grid size={settings.mainToolbarIconSize} />} label="Grid Settings" active={isGridSettingsOpen} onClick={() => setIsGridSettingsOpen(!isGridSettingsOpen)} />
