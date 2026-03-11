@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { Stage, Layer, Rect, Transformer, Text, Group, Path, Line, Circle } from 'react-konva';
 import { TileData, Tool, CanvasElement, GroupData, ColorTileData } from './types';
 import { TOOLTIPS } from './tooltips';
-import { Trash2, MousePointer2, Square, Eye, EyeOff, FolderPlus, Hand, ZoomIn, Settings, Palette, Maximize2, Layout, X, Grid } from 'lucide-react';
+import { Trash2, MousePointer2, Square, Eye, EyeOff, FolderPlus, Hand, ZoomIn, Settings, Palette, Maximize2, Layout, X, Grid, Lock, Unlock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { INITIAL_ELEMENTS, STORAGE_KEY, DEFAULT_SETTINGS } from './constants';
@@ -41,7 +41,8 @@ export default function App() {
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); }, [settings]);
   const updateSetting = (key: keyof typeof DEFAULT_SETTINGS, val: any) => setSettings(prev => ({ ...prev, [key]: val }));
   const [isSettingsOpen, setIsSettingsOpen] = useState(false); const [isGridSettingsOpen, setIsGridSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'canvas' | 'tiles' | 'visuals'>('canvas');
+  const [settingsTab, setSettingsTab] = useState<'color' | 'rect' | 'toolbar' | 'general' | 'groups'>('general');
+  const [elementsPanelCollapsed, setElementsPanelCollapsed] = useState(false);
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
   const [stageScale, setStageScale] = useState(1); const [isDrawing, setIsDrawing] = useState(false);
   const [isDrawingGroup, setIsDrawingGroup] = useState(false); const [isSelecting, setIsSelecting] = useState(false);
@@ -109,7 +110,7 @@ export default function App() {
 
   useEffect(() => {
     const canvas = document.createElement('canvas'); canvas.width = 40; canvas.height = 40; const ctx = canvas.getContext('2d');
-    if (ctx) { ctx.fillStyle = '#1a1a1a'; ctx.fillRect(0, 0, 40, 40); ctx.fillStyle = '#222222'; ctx.fillRect(0, 0, 20, 20); ctx.fillRect(20, 20, 20, 20);
+    if (ctx) { ctx.fillStyle = '#111111'; ctx.fillRect(0, 0, 40, 40); ctx.fillStyle = '#1a1a1a'; ctx.fillRect(0, 0, 20, 20); ctx.fillRect(20, 20, 20, 20);
       const img = new Image(); img.src = canvas.toDataURL(); img.onload = () => setPatternImage(img);
     }
   }, []);
@@ -191,7 +192,6 @@ export default function App() {
     const roundedWorldPos = { x: Math.round(worldPos.x), y: Math.round(worldPos.y) };
 
     if (isSettingsOpen) setIsSettingsOpen(false);
-    if (isGridSettingsOpen) setIsGridSettingsOpen(false);
     if (e.evt.button !== 0) return;
 
     const isBackground = e.target === stage || e.target.name() === 'bg-rect' || e.target.name() === 'grid-rect';
@@ -202,7 +202,7 @@ export default function App() {
       setCurrentDrawingTile({ id: `tile-temp`, name: '', type: 'tile', x: roundedWorldPos.x, y: roundedWorldPos.y, width: 0, height: 0, tileX: roundedWorldPos.x, tileY: roundedWorldPos.y, fill: '#808080', stroke: 'transparent', strokeWidth: 0, visible: true, depth: elements.length + 1, cornerRadius: 0, highlightColor: '#3b82f6' });
     } else if (tool === 'group' && isBackground) {
       setIsDrawingGroup(true); setNewTileStart(roundedWorldPos);
-      setCurrentDrawingGroup({ id: `group-temp`, name: '', type: 'group', tileX: roundedWorldPos.x, tileY: roundedWorldPos.y, tileWidth: 0, tileHeight: 0, color: '#3b82f6', opacity: 1, expanded: true, visible: true, depth: elements.length + 1 });
+      setCurrentDrawingGroup({ id: `group-temp`, name: '', type: 'group', tileX: roundedWorldPos.x, tileY: roundedWorldPos.y, tileWidth: 0, tileHeight: 0, color: getDistinctColor(), opacity: 1, expanded: true, visible: true, depth: elements.length + 1 });
     } else if (tool === 'select' && isBackground) { setIsSelecting(true); setSelectionStart(roundedWorldPos); setSelectionRect({ x: roundedWorldPos.x, y: roundedWorldPos.y, width: 0, height: 0 }); setSelectedIds([]); }
   };
 
@@ -301,11 +301,54 @@ export default function App() {
   const handleTilePointerDown = (e: React.PointerEvent, el: CanvasElement, forceDrag: boolean = false) => {
     if (!forceDrag && (tool === 'hand' || tool === 'zoom')) return;
     e.stopPropagation();
+
+    // If element is inside a locked group, target the locked group instead
+    let targetEl = el;
+    let currentParentId = el.parentId;
+    while (currentParentId) {
+      const parent = elementsRef.current.find(e => e.id === currentParentId) as GroupData;
+      if (parent && parent.locked) {
+        targetEl = parent;
+      }
+      currentParentId = parent?.parentId;
+    }
+
     let cur = selectedIdsRef.current;
-    if (e.shiftKey || e.ctrlKey || e.metaKey) { if (cur.includes(el.id)) cur = cur.filter(id => id !== el.id); else cur = [...cur, el.id]; setSelectedIds(cur); }
-    else if (!cur.includes(el.id)) { cur = [el.id]; setSelectedIds(cur); }
+    if (e.shiftKey || e.ctrlKey || e.metaKey) { 
+      if (cur.includes(targetEl.id)) cur = cur.filter(id => id !== targetEl.id); 
+      else cur = [...cur, targetEl.id]; 
+      setSelectedIds(cur); 
+    }
+    else if (!cur.includes(targetEl.id)) { 
+      cur = [targetEl.id]; 
+      setSelectedIds(cur); 
+    }
+
     const startX = e.clientX; const startY = e.clientY;
-    const startPositions = elementsRef.current.filter(c => cur.includes(c.id) || (el.type === 'group' && c.parentId === el.id)).map(c => ({ id: c.id, x: c.tileX, y: c.tileY }));
+    
+    const getDescendantIds = (parentId: string): string[] => {
+      const children = elementsRef.current.filter(e => e.parentId === parentId);
+      let ids: string[] = [];
+      children.forEach(c => {
+        ids.push(c.id);
+        if (c.type === 'group') ids = [...ids, ...getDescendantIds(c.id)];
+      });
+      return ids;
+    };
+
+    const allIdsToMove = new Set<string>();
+    cur.forEach(id => {
+      allIdsToMove.add(id);
+      const element = elementsRef.current.find(e => e.id === id);
+      if (element?.type === 'group') {
+        getDescendantIds(id).forEach(childId => allIdsToMove.add(childId));
+      }
+    });
+
+    const startPositions = elementsRef.current
+      .filter(c => allIdsToMove.has(c.id))
+      .map(c => ({ id: c.id, x: c.tileX, y: c.tileY }));
+
     const onPointerMove = (me: PointerEvent) => {
       const dx = Math.round((me.clientX - startX) / stageScale); const dy = Math.round((me.clientY - startY) / stageScale);
       setElements(prev => {
@@ -455,6 +498,8 @@ export default function App() {
           onRename={handleRename}
           onToggleVisibility={handleToggleVisibility}
           onCreateGroup={handleCreateGroupFromPanel}
+          collapsed={elementsPanelCollapsed}
+          onToggleCollapse={() => setElementsPanelCollapsed(!elementsPanelCollapsed)}
         />
         <div className="flex-1 relative overflow-hidden">
           <Stage
@@ -467,7 +512,7 @@ export default function App() {
               const m = { x: (p.x - s.x()) / oldS, y: (p.y - s.y()) / oldS };
               const newS = e.evt.deltaY < 0 ? oldS * 1.05 : oldS / 1.05;
               setStageScale(newS); setStagePos({ x: p.x - m.x * newS, y: p.y - m.y * newS });
-            } else setStagePos(prev => ({ x: prev.x - e.evt.deltaX, y: prev.y - e.evt.deltaY }));
+            } else setStagePos(prev => ({ x: prev.x + e.evt.deltaX, y: prev.y + e.evt.deltaY }));
           }}
           onPointerDown={(e) => { setContextMenu(null); handleStagePointerDown(e); }}
           onPointerMove={handleStagePointerMove} onPointerUp={handleStagePointerUp}
@@ -478,8 +523,37 @@ export default function App() {
           ref={stageRef} className="absolute inset-0 z-0"
         >
           <Layer>
-            {patternImage && <Rect name="bg-rect" x={-stagePos.x / stageScale} y={-stagePos.y / stageScale} width={window.innerWidth / stageScale} height={window.innerHeight / stageScale} fillPatternImage={patternImage} />}
-            {settings.showGrid && gridPatternImage && <Rect name="grid-rect" x={-stagePos.x / stageScale} y={-stagePos.y / stageScale} width={window.innerWidth / stageScale} height={window.innerHeight / stageScale} fillPatternImage={gridPatternImage} fillPatternOffset={{ x: stagePos.x / stageScale, y: stagePos.y / stageScale }} />}
+            {patternImage && (
+              <Rect 
+                x={-stagePos.x / stageScale - 10000} 
+                y={-stagePos.y / stageScale - 10000} 
+                width={window.innerWidth / stageScale + 20000} 
+                height={window.innerHeight / stageScale + 20000} 
+                fillPatternImage={patternImage} 
+                listening={false} 
+              />
+            )}
+            {settings.showGrid && (
+              <Group>
+                {(() => {
+                  const gridSize = settings.gridSize;
+                  const width = window.innerWidth / stageScale;
+                  const height = window.innerHeight / stageScale;
+                  const startX = Math.floor(-stagePos.x / stageScale / gridSize) * gridSize;
+                  const startY = Math.floor(-stagePos.y / stageScale / gridSize) * gridSize;
+                  const endX = startX + width + gridSize;
+                  const endY = startY + height + gridSize;
+                  const lines = [];
+                  for (let x = startX; x <= endX; x += gridSize) {
+                    lines.push(<Line key={`v-${x}`} points={[x, startY, x, endY]} stroke={settings.gridColor} strokeWidth={1 / stageScale} opacity={settings.gridOpacity} listening={false} />);
+                  }
+                  for (let y = startY; y <= endY; y += gridSize) {
+                    lines.push(<Line key={`h-${y}`} points={[startX, y, endX, y]} stroke={settings.gridColor} strokeWidth={1 / stageScale} opacity={settings.gridOpacity} listening={false} />);
+                  }
+                  return lines;
+                })()}
+              </Group>
+            )}
             {tiles.sort((a,b)=>(a.depth||0)-(b.depth||0)).map((tile) => {
               const colorTile = elements.find(e => e.id === tile.colorTileId) as ColorTileData | undefined;
               const fill = colorTile ? getColorHex(colorTile) : tile.fill;
@@ -488,7 +562,13 @@ export default function App() {
                 <Rect key={tile.id} id={tile.id} {...tile} fill={fill} draggable={tool === 'select'}
                   onDragMove={(e) => {
                     const n = e.target; if (!selectedIdsRef.current.includes(n.id())) return;
-                    const dx = Math.round(n.x()) - tile.x; const dy = Math.round(n.y()) - tile.y;
+                    let nx = n.x(); let ny = n.y();
+                    if (e.evt.shiftKey && settings.gridSize > 0) {
+                      nx = Math.round(nx / settings.gridSize) * settings.gridSize;
+                      ny = Math.round(ny / settings.gridSize) * settings.gridSize;
+                      n.position({ x: nx, y: ny });
+                    }
+                    const dx = nx - tile.x; const dy = ny - tile.y;
                     setElements(prev => prev.map(el => selectedIdsRef.current.includes(el.id) && el.type === 'tile' ? { ...el, x: Math.round(el.x + dx), y: Math.round(el.y + dy) } : el));
                   }}
                   onDragEnd={() => pushToHistory(elementsRef.current)}
@@ -499,7 +579,8 @@ export default function App() {
                 />
               );
             })}
-            {currentDrawingTile && <Rect {...currentDrawingTile} />}
+            {currentDrawingTile && <Rect {...currentDrawingTile} fill="rgba(255,255,255,0.05)" stroke="#ffffff" strokeWidth={1/stageScale} />}
+            {currentDrawingGroup && <Rect x={currentDrawingGroup.tileX} y={currentDrawingGroup.tileY} width={currentDrawingGroup.tileWidth} height={currentDrawingGroup.tileHeight} fill={hexToRgba(currentDrawingGroup.color, 0.1)} stroke={currentDrawingGroup.color} strokeWidth={1/stageScale} />}
             {selectionRect && <Rect {...selectionRect} fill="rgba(59, 130, 246, 0.1)" stroke="#3b82f6" strokeWidth={1 / stageScale} dash={[5 / stageScale, 5 / stageScale]} />}
             {tiles.filter(t => t.colorTileId).map(t => {
               const s = elements.find(e => e.id === t.colorTileId) as ColorTileData | undefined; if (!s) return null;
@@ -577,26 +658,153 @@ export default function App() {
         <div className="absolute inset-0 pointer-events-none" style={{ transform: `translate(${stagePos.x}px, ${stagePos.y}px) scale(${stageScale})`, transformOrigin: '0 0' }}>
           {groups.map(g => {
             const theme = getThemeColor(g.color, settings);
+            const isSelected = selectedIds.includes(g.id);
+            const isInteracting = interactingId === g.id;
             return (
-              <motion.div key={g.id} className="group" 
+              <motion.div key={g.id} className="group/node" 
                 initial={false}
-                animate={{ left: g.tileX, top: g.tileY }}
-                transition={selectedIds.includes(g.id) ? { duration: 0 } : { type: 'spring', stiffness: 400, damping: 35 }}
-                style={{ position: 'absolute', width: g.tileWidth, height: g.tileHeight, backgroundColor: hexToRgba(g.color, g.opacity ?? 1), border: `2px dashed ${hexToRgba(g.color, (g.opacity ?? 1) * 0.4)}`, borderRadius: 16, pointerEvents: 'none', zIndex: 10 }}>
+                animate={{ 
+                  left: g.tileX, 
+                  top: g.tileY,
+                  width: g.tileWidth,
+                  height: g.tileHeight
+                }}
+                transition={isInteracting || isSelected ? { duration: 0 } : { type: 'spring', stiffness: 400, damping: 35 }}
+                style={{ position: 'absolute', backgroundColor: hexToRgba(g.color, g.opacity ?? 1), border: `2px dashed ${hexToRgba(g.color, (g.opacity ?? 1) * 0.4)}`, borderRadius: 16, pointerEvents: 'none', zIndex: 10 }}>
+                
+                {/* Group Handle */}
+                <div className={`absolute origin-bottom pointer-events-auto cursor-grab active:cursor-grabbing transition-all duration-300 ease-out ${isSettingsOpen || isGridSettingsOpen ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 group-hover/node:opacity-100 group-hover/node:translate-y-0'}`} 
+                     style={{ 
+                       width: (g.tileWidth * (settings.groupHandleWidthPercent / 100)) + 3.5, 
+                       height: settings.groupHandleHeight, 
+                       left: (g.tileWidth * (1 - settings.groupHandleWidthPercent / 100)) / 2 - 1.75, 
+                       bottom: `calc(100% + ${settings.groupHandleY}px)`, 
+                       borderTopLeftRadius: 12, 
+                       borderTopRightRadius: 12, 
+                       backgroundColor: g.color, 
+                       zIndex: 30,
+                       maskImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='40' preserveAspectRatio='none'%3E%3Cpath d='M0 0h100v40H0z M35 15 h30 a5 5 0 0 1 0 10 h-30 a5 5 0 0 1 0 -10 z' fill-rule='evenodd'/%3E%3C/svg%3E")`,
+                       WebkitMaskImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='40' preserveAspectRatio='none'%3E%3Cpath d='M0 0h100v40H0z M35 15 h30 a5 5 0 0 1 0 10 h-30 a5 5 0 0 1 0 -10 z' fill-rule='evenodd'/%3E%3C/svg%3E")`,
+                       maskSize: '100% 100%',
+                       maskRepeat: 'no-repeat'
+                     }} 
+                     onPointerDown={(e) => handleTilePointerDown(e, g, true)} />
+
                 <div className="absolute top-0 left-0 right-0 h-10 px-4 flex items-center justify-center cursor-grab active:cursor-grabbing rounded-t-[14px] z-20 transition-colors pointer-events-auto" style={{ backgroundColor: theme.hex }} onPointerDown={(e) => handleTilePointerDown(e, g)}>
                   <TileNameInput textColor={theme.textColor} name={g.name} onChange={(e:any) => handleBulkRelativeUpdate(selectedIds.includes(g.id)?selectedIds:[g.id], () => ({ name: e.target.value }))} onCommit={(e:any) => handleBulkUpdateEnd(selectedIds.includes(g.id)?selectedIds:[g.id], { name: e.target.value })} textScale={settings.textScale} textStroke={settings.textStroke} showTooltip={showTooltip} hideTooltip={hideTooltip} />
                 </div>
-                <div className="absolute top-10 left-0 right-0 h-8 overflow-hidden z-10 transition-colors pointer-events-auto" style={{ backgroundColor: hexToRgba(theme.hex, 0.5), borderBottom: `1px solid ${hexToRgba(theme.hex, 0.25)}` }}>
-                  <div className={`absolute inset-0 flex items-center justify-center gap-4 transition-transform ${isSettingsOpen ? 'translate-y-0' : '-translate-y-full group-hover:translate-y-0'}`}>
-                    <input type="range" min="0" max="100" step="1" value={(g.opacity ?? 1) * 100} onMouseEnter={() => showTooltip(TOOLTIPS.opacity)} onMouseLeave={hideTooltip} onChange={(e) => { const v = parseFloat(e.target.value)/100; handleBulkRelativeUpdate(selectedIds.includes(g.id)?selectedIds:[g.id], el => ({ opacity: Math.max(0, Math.min(1, (el as any).opacity + (v - (g.opacity ?? 1)))) })); }} onBlur={(e) => pushToHistory(elementsRef.current)} onPointerDown={e => e.stopPropagation()} className="w-16" style={{ accentColor: g.color }} />
-                    <div className="relative rounded-full border border-white/20 cursor-pointer shrink-0" style={{ backgroundColor: g.color, width: 16 * settings.textScale, height: 16 * settings.textScale }} onMouseEnter={() => showTooltip(TOOLTIPS.colorPicker)} onMouseLeave={hideTooltip}>
-                      <input type="color" value={g.color} onChange={(e) => handleBulkRelativeUpdate(selectedIds.includes(g.id)?selectedIds:[g.id], () => ({ color: e.target.value }))} onBlur={(e) => pushToHistory(elementsRef.current)} className="absolute inset-0 opacity-0 cursor-pointer" onPointerDown={e => e.stopPropagation()} />
+                <div className="absolute top-10 left-0 right-0 h-8 overflow-hidden z-10 transition-colors pointer-events-auto" style={{ backgroundColor: hexToRgba(theme.hex, settings.tileToolbarOpacity), borderBottom: `1px solid ${hexToRgba(theme.hex, 0.25)}` }}>
+                  <div className={`absolute inset-0 flex items-center justify-around px-4 transition-transform ${isSettingsOpen || isGridSettingsOpen ? 'translate-y-0' : '-translate-y-full group-hover/node:translate-y-0'}`}>
+                    <button 
+                      onPointerDown={e => e.stopPropagation()} 
+                      onClick={() => handleUpdateEnd(g.id, { locked: !g.locked })}
+                      className="text-white/70 hover:text-white shrink-0"
+                    >
+                      {g.locked ? <Lock size={14 * settings.textScale} /> : <Unlock size={14 * settings.textScale} />}
+                    </button>
+                    
+                    <div className="flex items-center gap-2 flex-1 justify-center max-w-[120px]">
+                      <input type="range" min="0" max="100" step="1" value={(g.opacity ?? 1) * 100} onMouseEnter={() => showTooltip(TOOLTIPS.opacity)} onMouseLeave={hideTooltip} onChange={(e) => { const v = parseFloat(e.target.value)/100; handleBulkRelativeUpdate(selectedIds.includes(g.id)?selectedIds:[g.id], el => ({ opacity: Math.max(0, Math.min(1, (el as any).opacity + (v - (g.opacity ?? 1)))) })); }} onBlur={(e) => pushToHistory(elementsRef.current)} onPointerDown={e => e.stopPropagation()} className="w-full" style={{ accentColor: g.color }} />
                     </div>
-                    <button onPointerDown={e => e.stopPropagation()} onMouseEnter={() => showTooltip(TOOLTIPS.delete)} onMouseLeave={hideTooltip} onClick={() => handleDeleteMultiple(selectedIds.includes(g.id) ? selectedIds : [g.id])} className="text-white/50 hover:text-red-400"><Trash2 size={14 * settings.textScale} /></button>
+
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div className="relative rounded-full border border-white/20 cursor-pointer" style={{ backgroundColor: g.color, width: 16 * settings.textScale, height: 16 * settings.textScale }} onMouseEnter={() => showTooltip(TOOLTIPS.colorPicker)} onMouseLeave={hideTooltip}>
+                        <input type="color" value={g.color} onChange={(e) => handleBulkRelativeUpdate(selectedIds.includes(g.id)?selectedIds:[g.id], () => ({ color: e.target.value }))} onBlur={(e) => pushToHistory(elementsRef.current)} className="absolute inset-0 opacity-0 cursor-pointer" onPointerDown={e => e.stopPropagation()} />
+                      </div>
+                      <button onPointerDown={e => e.stopPropagation()} onMouseEnter={() => showTooltip(TOOLTIPS.delete)} onMouseLeave={hideTooltip} onClick={() => handleDeleteMultiple(selectedIds.includes(g.id) ? selectedIds : [g.id])} className="text-white/50 hover:text-red-400"><Trash2 size={14 * settings.textScale} /></button>
+                    </div>
                   </div>
                 </div>
-                <div className="absolute -right-2 top-0 bottom-0 w-4 cursor-ew-resize pointer-events-auto" onPointerDown={e => { e.stopPropagation(); const sx = e.clientX; const sw = g.tileWidth; const move = (me:any) => { let nw = sw + (me.clientX - sx) / stageScale; if (me.shiftKey && settings.gridSize > 0) nw = Math.round((g.tileX + nw) / settings.gridSize) * settings.gridSize - g.tileX; handleUpdate(g.id, { tileWidth: Math.max(50, nw) }); }; const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); pushToHistory(elementsRef.current); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); }} />
-                <div className="absolute -bottom-2 left-0 right-0 h-4 cursor-ns-resize pointer-events-auto" onPointerDown={e => { e.stopPropagation(); const sy = e.clientY; const sh = g.tileHeight; const move = (me:any) => { let nh = sh + (me.clientY - sy) / stageScale; if (me.shiftKey && settings.gridSize > 0) nh = Math.round((g.tileY + nh) / settings.gridSize) * settings.gridSize - g.tileY; handleUpdate(g.id, { tileHeight: Math.max(50, nh) }); }; const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); pushToHistory(elementsRef.current); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); }} />
+
+                {/* Resizing handles */}
+                {/* Top */}
+                <div className="absolute -top-2 left-4 right-4 h-4 cursor-ns-resize pointer-events-auto z-30" onPointerDown={e => { e.stopPropagation(); setInteractingId(g.id); const sy = e.clientY; const sh = g.tileHeight; const sy0 = g.tileY; const move = (me:any) => { let dy = (me.clientY - sy) / stageScale; let nh = sh - dy; let ny = sy0 + dy; if (me.shiftKey && settings.gridSize > 0) { ny = Math.round(ny / settings.gridSize) * settings.gridSize; nh = sh + sy0 - ny; } handleUpdate(g.id, { tileHeight: Math.max(50, nh), tileY: ny }); }; const up = () => { setInteractingId(null); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); pushToHistory(elementsRef.current); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); }} />
+                {/* Left */}
+                <div className="absolute -left-2 top-4 bottom-4 w-4 cursor-ew-resize pointer-events-auto z-30" onPointerDown={e => { e.stopPropagation(); setInteractingId(g.id); const sx = e.clientX; const sw = g.tileWidth; const sx0 = g.tileX; const move = (me:any) => { let dx = (me.clientX - sx) / stageScale; let nw = sw - dx; let nx = sx0 + dx; if (me.shiftKey && settings.gridSize > 0) { nx = Math.round(nx / settings.gridSize) * settings.gridSize; nw = sw + sx0 - nx; } handleUpdate(g.id, { tileWidth: Math.max(50, nw), tileX: nx }); }; const up = () => { setInteractingId(null); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); pushToHistory(elementsRef.current); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); }} />
+                {/* Right */}
+                <div className="absolute -right-2 top-4 bottom-4 w-4 cursor-ew-resize pointer-events-auto z-30" onPointerDown={e => { e.stopPropagation(); setInteractingId(g.id); const sx = e.clientX; const sw = g.tileWidth; const move = (me:any) => { let nw = sw + (me.clientX - sx) / stageScale; if (me.shiftKey && settings.gridSize > 0) nw = Math.round((g.tileX + nw) / settings.gridSize) * settings.gridSize - g.tileX; handleUpdate(g.id, { tileWidth: Math.max(50, nw) }); }; const up = () => { setInteractingId(null); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); pushToHistory(elementsRef.current); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); }} />
+                {/* Bottom */}
+                <div className="absolute -bottom-2 left-4 right-4 h-4 cursor-ns-resize pointer-events-auto z-30" onPointerDown={e => { e.stopPropagation(); setInteractingId(g.id); const sy = e.clientY; const sh = g.tileHeight; const move = (me:any) => { let nh = sh + (me.clientY - sy) / stageScale; if (me.shiftKey && settings.gridSize > 0) nh = Math.round((g.tileY + nh) / settings.gridSize) * settings.gridSize - g.tileY; handleUpdate(g.id, { tileHeight: Math.max(50, nh) }); }; const up = () => { setInteractingId(null); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); pushToHistory(elementsRef.current); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); }} />
+                
+                {/* Corners */}
+                {/* Top Left */}
+                <div className="absolute -left-2 -top-2 w-6 h-6 cursor-nwse-resize pointer-events-auto z-30" onPointerDown={e => { 
+                  e.stopPropagation(); setInteractingId(g.id);
+                  const sx = e.clientX; const sy = e.clientY; 
+                  const sw = g.tileWidth; const sh = g.tileHeight;
+                  const sx0 = g.tileX; const sy0 = g.tileY;
+                  const move = (me:any) => { 
+                    let dx = (me.clientX - sx) / stageScale;
+                    let dy = (me.clientY - sy) / stageScale;
+                    let nw = sw - dx; let nh = sh - dy;
+                    let nx = sx0 + dx; let ny = sy0 + dy;
+                    if (me.shiftKey && settings.gridSize > 0) {
+                      nx = Math.round(nx / settings.gridSize) * settings.gridSize;
+                      ny = Math.round(ny / settings.gridSize) * settings.gridSize;
+                      nw = sw + sx0 - nx; nh = sh + sy0 - ny;
+                    }
+                    handleUpdate(g.id, { tileWidth: Math.max(50, nw), tileHeight: Math.max(50, nh), tileX: nx, tileY: ny }); 
+                  };
+                  const up = () => { setInteractingId(null); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); pushToHistory(elementsRef.current); };
+                  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+                }} />
+                {/* Top Right */}
+                <div className="absolute -right-2 -top-2 w-6 h-6 cursor-nesw-resize pointer-events-auto z-30" onPointerDown={e => { 
+                  e.stopPropagation(); setInteractingId(g.id);
+                  const sx = e.clientX; const sy = e.clientY; 
+                  const sw = g.tileWidth; const sh = g.tileHeight;
+                  const sy0 = g.tileY;
+                  const move = (me:any) => { 
+                    let nw = sw + (me.clientX - sx) / stageScale;
+                    let dy = (me.clientY - sy) / stageScale;
+                    let nh = sh - dy; let ny = sy0 + dy;
+                    if (me.shiftKey && settings.gridSize > 0) {
+                      nw = Math.round((g.tileX + nw) / settings.gridSize) * settings.gridSize - g.tileX;
+                      ny = Math.round(ny / settings.gridSize) * settings.gridSize;
+                      nh = sh + sy0 - ny;
+                    }
+                    handleUpdate(g.id, { tileWidth: Math.max(50, nw), tileHeight: Math.max(50, nh), tileY: ny }); 
+                  };
+                  const up = () => { setInteractingId(null); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); pushToHistory(elementsRef.current); };
+                  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+                }} />
+                {/* Bottom Left */}
+                <div className="absolute -left-2 -bottom-2 w-6 h-6 cursor-nesw-resize pointer-events-auto z-30" onPointerDown={e => { 
+                  e.stopPropagation(); setInteractingId(g.id);
+                  const sx = e.clientX; const sy = e.clientY; 
+                  const sw = g.tileWidth; const sh = g.tileHeight;
+                  const sx0 = g.tileX;
+                  const move = (me:any) => { 
+                    let dx = (me.clientX - sx) / stageScale;
+                    let nh = sh + (me.clientY - sy) / stageScale;
+                    let nw = sw - dx; let nx = sx0 + dx;
+                    if (me.shiftKey && settings.gridSize > 0) {
+                      nx = Math.round(nx / settings.gridSize) * settings.gridSize;
+                      nw = sw + sx0 - nx;
+                      nh = Math.round((g.tileY + nh) / settings.gridSize) * settings.gridSize - g.tileY;
+                    }
+                    handleUpdate(g.id, { tileWidth: Math.max(50, nw), tileHeight: Math.max(50, nh), tileX: nx }); 
+                  };
+                  const up = () => { setInteractingId(null); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); pushToHistory(elementsRef.current); };
+                  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+                }} />
+                {/* Bottom Right Corner */}
+                <div className="absolute -right-2 -bottom-2 w-6 h-6 cursor-nwse-resize pointer-events-auto z-30" onPointerDown={e => { 
+                  e.stopPropagation(); setInteractingId(g.id);
+                  const sx = e.clientX; const sy = e.clientY; 
+                  const sw = g.tileWidth; const sh = g.tileHeight;
+                  const move = (me:any) => { 
+                    let nw = sw + (me.clientX - sx) / stageScale;
+                    let nh = sh + (me.clientY - sy) / stageScale;
+                    if (me.shiftKey && settings.gridSize > 0) {
+                      nw = Math.round((g.tileX + nw) / settings.gridSize) * settings.gridSize - g.tileX;
+                      nh = Math.round((g.tileY + nh) / settings.gridSize) * settings.gridSize - g.tileY;
+                    }
+                    handleUpdate(g.id, { tileWidth: Math.max(50, nw), tileHeight: Math.max(50, nh) }); 
+                  };
+                  const up = () => { setInteractingId(null); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); pushToHistory(elementsRef.current); };
+                  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+                }} />
               </motion.div>
             );
           })}
@@ -618,18 +826,18 @@ export default function App() {
                 <div className="group/node relative">
                   <div className="absolute bottom-full left-0 w-full h-8 z-10 cursor-grab active:cursor-grabbing" onPointerDown={(e) => handleTilePointerDown(e, el, true)} />
                   
-                  <div className={`absolute origin-bottom pointer-events-auto cursor-grab active:cursor-grabbing transition-all duration-300 ease-out ${isSettingsOpen ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 group-hover/node:opacity-100 group-hover/node:translate-y-0'}`} 
+                  <div className={`absolute origin-bottom pointer-events-auto cursor-grab active:cursor-grabbing transition-all duration-300 ease-out ${isSettingsOpen || isGridSettingsOpen ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 group-hover/node:opacity-100 group-hover/node:translate-y-0'}`} 
                        style={{ 
-                         width: elWidth + 4, 
+                         width: elWidth + 3.5, 
                          height: settings.handleHeight, 
-                         left: -2, 
+                         left: -1.75, 
                          bottom: `calc(100% + ${settings.handleY}px)`, 
                          borderTopLeftRadius: 12, 
                          borderTopRightRadius: 12, 
                          backgroundColor: (el as any).highlightColor || '#3b82f6', 
                          zIndex: -1,
-                         maskImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='40' preserveAspectRatio='none'%3E%3Cpath d='M0 0h100v40H0zM30 15h40v10H30z' fill-rule='evenodd'/%3E%3C/svg%3E")`,
-                         WebkitMaskImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='40' preserveAspectRatio='none'%3E%3Cpath d='M0 0h100v40H0zM30 15h40v10H30z' fill-rule='evenodd'/%3E%3C/svg%3E")`,
+                         maskImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='40' preserveAspectRatio='none'%3E%3Cpath d='M0 0h100v40H0z M35 15 h30 a5 5 0 0 1 0 10 h-30 a5 5 0 0 1 0 -10 z' fill-rule='evenodd'/%3E%3C/svg%3E")`,
+                         WebkitMaskImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='40' preserveAspectRatio='none'%3E%3Cpath d='M0 0h100v40H0z M35 15 h30 a5 5 0 0 1 0 10 h-30 a5 5 0 0 1 0 -10 z' fill-rule='evenodd'/%3E%3C/svg%3E")`,
                          maskSize: '100% 100%',
                          maskRepeat: 'no-repeat'
                        }} 
@@ -644,7 +852,7 @@ export default function App() {
                     <div className="relative">
                       <div className="absolute top-0 left-0 right-0 overflow-hidden z-30 pointer-events-none" style={{ height: settings.tileToolbarHeight }}>
                         <div className="absolute inset-0" style={{ backgroundColor: hexToRgba(theme.hex, settings.tileToolbarOpacity), borderBottom: `1px solid ${theme.hex}40` }} />
-                        <div className="flex items-center justify-between px-4 w-full h-full transition-transform" style={{ transform: (isSettingsOpen || hoveredTileId === el.id) ? 'translateY(0)' : 'translateY(-100%)' }}>
+                        <div className="flex items-center justify-between px-4 w-full h-full transition-transform" style={{ transform: (isSettingsOpen || isGridSettingsOpen || hoveredTileId === el.id) ? 'translateY(0)' : 'translateY(-100%)' }}>
                           {el.type === 'tile' && (
                             <button onPointerDown={e => e.stopPropagation()} onMouseEnter={() => showTooltip(TOOLTIPS.visibility)} onMouseLeave={hideTooltip} onClick={(e) => { e.stopPropagation(); handleBulkUpdateEnd(isSelected?selectedIds:[el.id], { visible: !(el as any).visible }); }} className="text-white/70 hover:text-white pointer-events-auto">{(el as any).visible ? <Eye size={16 * settings.tileIconScale} /> : <EyeOff size={16 * settings.tileIconScale} />}</button>
                           )}
@@ -734,10 +942,52 @@ export default function App() {
           <ToolButton icon={<Square size={settings.mainToolbarIconSize} />} label="Rectangle (R)" active={tool === 'tile'} onClick={() => setTool('tile')} />
           <ToolButton icon={<FolderPlus size={settings.mainToolbarIconSize} />} label="Group (G)" active={tool === 'group'} onClick={() => setTool('group')} />
           <div className="w-px h-6 bg-white/10 mx-1" />
-          <ToolButton icon={<Grid size={settings.mainToolbarIconSize} />} label="Grid Settings" active={isGridSettingsOpen} onClick={() => { setIsGridSettingsOpen(!isGridSettingsOpen); setIsSettingsOpen(false); }} />
-          <ToolButton icon={<Settings size={settings.mainToolbarIconSize} />} label="Settings" active={isSettingsOpen} onClick={() => { setIsSettingsOpen(!isSettingsOpen); setIsGridSettingsOpen(false); }} />
+          <div className="flex items-center gap-1 px-2 group/grid">
+            <input 
+              type="checkbox" 
+              checked={settings.showGrid} 
+              onChange={(e) => updateSetting('showGrid', e.target.checked)} 
+              className="w-4 h-4 rounded accent-blue-500 cursor-pointer" 
+            />
+            <ToolButton icon={<Grid size={settings.mainToolbarIconSize} />} label="Grid Settings" active={isGridSettingsOpen} onClick={() => setIsGridSettingsOpen(!isGridSettingsOpen)} />
+          </div>
+          <ToolButton icon={<Settings size={settings.mainToolbarIconSize} />} label="Settings" active={isSettingsOpen} onClick={() => setIsSettingsOpen(!isSettingsOpen)} />
         </div>
       </motion.div>
+
+      <AnimatePresence>
+        {isGridSettingsOpen && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-[#1a1a1a] border border-white/10 p-6 rounded-2xl shadow-2xl w-80 z-[60]"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-white font-bold flex items-center gap-2 text-xs uppercase tracking-widest"><Grid size={14} /> Grid Settings</h3>
+              <button onClick={() => setIsGridSettingsOpen(false)} className="text-zinc-500 hover:text-white"><X size={16} /></button>
+            </div>
+            <div className="space-y-6">
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Grid Cell Size</label>
+                <ColorRow value={settings.gridSize} min={10} max={200} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('gridSize',v)} onCommit={(v:any)=>updateSetting('gridSize',v)} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Grid Line Opacity</label>
+                <ColorRow value={settings.gridOpacity} min={0.01} max={1} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('gridOpacity',v)} onCommit={(v:any)=>updateSetting('gridOpacity',v)} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Grid Color</label>
+                <div className="flex justify-center">
+                  <div className="relative rounded-full border border-white/20 cursor-pointer w-8 h-8" style={{ backgroundColor: settings.gridColor }}>
+                    <input type="color" value={settings.gridColor} onChange={(e) => updateSetting('gridColor', e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>{isSettingsOpen && (
         <motion.div drag dragMomentum={false} onDragEnd={(e, info) => { updateSetting('settingsX', settings.settingsX + info.offset.x); updateSetting('settingsY', settings.settingsY + info.offset.y); }} 
@@ -752,64 +1002,119 @@ export default function App() {
           </div>
           
           <div className="flex border-b border-white/10 shrink-0">
-            {(['canvas', 'tiles', 'visuals'] as const).map(tab => (
+            {(['color', 'rect', 'groups', 'toolbar', 'general'] as const).map(tab => (
               <button 
                 key={tab} 
                 onClick={() => setSettingsTab(tab)}
-                className={`flex-1 py-3 text-[10px] uppercase font-bold tracking-widest transition-colors ${settingsTab === tab ? 'text-blue-500 bg-blue-500/5 border-b-2 border-blue-500' : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'}`}
+                className={`flex-1 py-3 text-[9px] uppercase font-bold tracking-widest transition-colors ${settingsTab === tab ? 'text-blue-500 bg-blue-500/5 border-b-2 border-blue-500' : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'}`}
               >
-                {tab}
+                {tab === 'color' ? 'Color' : tab === 'rect' ? 'Rect' : tab === 'groups' ? 'Groups' : tab === 'toolbar' ? 'Toolbar' : 'General'}
               </button>
             ))}
           </div>
 
           <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
-            {settingsTab === 'canvas' && (
+            {settingsTab === 'general' && (
               <div className="space-y-6">
                 <div className="space-y-4">
-                  <h4 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4">Grid & Background</h4>
-                  <div className="flex items-center justify-between px-1 bg-white/5 p-3 rounded-xl border border-white/5">
-                    <span className="text-zinc-300 text-xs font-medium">Show Grid Overlay</span>
-                    <input type="checkbox" checked={settings.showGrid} onChange={(e) => updateSetting('showGrid', e.target.checked)} className="w-4 h-4 rounded accent-blue-500 cursor-pointer" />
+                  <h4 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4 text-center">Interface Scaling</h4>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Global UI Scale</label>
+                    <ColorRow value={settings.uiScale} min={0.5} max={2} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('uiScale',v)} onCommit={(v:any)=>updateSetting('uiScale',v)} />
                   </div>
-                  <ColorRow label="Grid Cell Size" value={settings.gridSize} min={10} max={200} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('gridSize',v)} onCommit={(v:any)=>updateSetting('gridSize',v)} />
-                  <ColorRow label="Grid Line Opacity" value={settings.gridOpacity} min={0.01} max={1} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('gridOpacity',v)} onCommit={(v:any)=>updateSetting('gridOpacity',v)} />
                 </div>
-                <div className="space-y-4">
-                  <h4 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4">Interface Scaling</h4>
-                  <ColorRow label="Main Toolbar Scale" value={settings.mainToolbarScale} min={0.5} max={2.5} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('mainToolbarScale',v)} onCommit={(v:any)=>updateSetting('mainToolbarScale',v)} />
-                  <ColorRow label="Global UI Scale" value={settings.uiScale} min={0.5} max={2} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('uiScale',v)} onCommit={(v:any)=>updateSetting('uiScale',v)} />
+                <div className="pt-4 border-t border-white/5">
+                  <button onClick={() => { navigator.clipboard.writeText(JSON.stringify(settings, null, 2)); showTooltip('Settings copied!'); setTimeout(hideTooltip, 2000); }} className="w-full py-3 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-bold text-zinc-400 hover:text-white transition-all border border-white/5">Copy All Settings to Clipboard</button>
                 </div>
               </div>
             )}
 
-            {settingsTab === 'tiles' && (
+            {settingsTab === 'groups' && (
               <div className="space-y-6">
                 <div className="space-y-4">
-                  <h4 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4">Tile Dimensions</h4>
-                  <ColorRow label="Standard Tile Width" value={settings.tileWidth} min={120} max={600} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('tileWidth',v)} onCommit={(v:any)=>updateSetting('tileWidth',v)} />
-                  <ColorRow label="Color Tile Width" value={settings.colorTileWidth} min={120} max={600} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('colorTileWidth',v)} onCommit={(v:any)=>updateSetting('colorTileWidth',v)} />
-                  <ColorRow label="Bottom Padding" value={settings.tileBottomPadding} min={0} max={100} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('tileBottomPadding',v)} onCommit={(v:any)=>updateSetting('tileBottomPadding',v)} />
-                </div>
-                <div className="space-y-4">
-                  <h4 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4">Handle Configuration</h4>
-                  <ColorRow label="Handle Height" value={settings.handleHeight} min={10} max={100} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('handleHeight',v)} onCommit={(v:any)=>updateSetting('handleHeight',v)} />
-                  <ColorRow label="Vertical Offset" value={settings.handleY} min={-100} max={100} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('handleY',v)} onCommit={(v:any)=>updateSetting('handleY',v)} />
+                  <h4 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4 text-center">Group Handle Proportions</h4>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Handle Height</label>
+                    <ColorRow value={settings.groupHandleHeight} min={10} max={100} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('groupHandleHeight',v)} onCommit={(v:any)=>updateSetting('groupHandleHeight',v)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Vertical Offset</label>
+                    <ColorRow value={settings.groupHandleY} min={-100} max={100} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('groupHandleY',v)} onCommit={(v:any)=>updateSetting('groupHandleY',v)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Width Percentage</label>
+                    <ColorRow value={settings.groupHandleWidthPercent} min={10} max={100} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('groupHandleWidthPercent',v)} onCommit={(v:any)=>updateSetting('groupHandleWidthPercent',v)} />
+                  </div>
                 </div>
               </div>
             )}
 
-            {settingsTab === 'visuals' && (
+            {settingsTab === 'rect' && (
               <div className="space-y-6">
                 <div className="space-y-4">
-                  <h4 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4">Typography</h4>
-                  <ColorRow label="Text Scale" value={settings.textScale} min={0.5} max={3} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('textScale',v)} onCommit={(v:any)=>updateSetting('textScale',v)} />
-                  <ColorRow label="Stroke Weight" value={settings.textStroke} min={0} max={5} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('textStroke',v)} onCommit={(v:any)=>updateSetting('textStroke',v)} />
+                  <h4 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4 text-center">Rectangle Tile Dimensions</h4>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Standard Width</label>
+                    <ColorRow value={settings.tileWidth} min={120} max={600} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('tileWidth',v)} onCommit={(v:any)=>updateSetting('tileWidth',v)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Bottom Padding</label>
+                    <ColorRow value={settings.tileBottomPadding} min={0} max={100} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('tileBottomPadding',v)} onCommit={(v:any)=>updateSetting('tileBottomPadding',v)} />
+                  </div>
                 </div>
                 <div className="space-y-4">
-                  <h4 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4">Toolbar Effects</h4>
-                  <ColorRow label="Toolbar Opacity" value={settings.tileToolbarOpacity} min={0} max={1} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('tileToolbarOpacity',v)} onCommit={(v:any)=>updateSetting('tileToolbarOpacity',v)} />
-                  <ColorRow label="Icon Scale" value={settings.tileIconScale} min={0.5} max={2.5} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('tileIconScale',v)} onCommit={(v:any)=>updateSetting('tileIconScale',v)} />
+                  <h4 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4 text-center">Handle Configuration</h4>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Handle Height</label>
+                    <ColorRow value={settings.handleHeight} min={10} max={100} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('handleHeight',v)} onCommit={(v:any)=>updateSetting('handleHeight',v)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Vertical Offset</label>
+                    <ColorRow value={settings.handleY} min={-100} max={100} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('handleY',v)} onCommit={(v:any)=>updateSetting('handleY',v)} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {settingsTab === 'color' && (
+              <div className="space-y-6">
+                <div className="space-y-4">
+                  <h4 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4 text-center">Color Tile Dimensions</h4>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Standard Width</label>
+                    <ColorRow value={settings.colorTileWidth} min={120} max={600} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('colorTileWidth',v)} onCommit={(v:any)=>updateSetting('colorTileWidth',v)} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {settingsTab === 'toolbar' && (
+              <div className="space-y-6">
+                <div className="space-y-4">
+                  <h4 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4 text-center">Main Toolbar</h4>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Toolbar Scale</label>
+                    <ColorRow value={settings.mainToolbarScale} min={0.5} max={2.5} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('mainToolbarScale',v)} onCommit={(v:any)=>updateSetting('mainToolbarScale',v)} />
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <h4 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4 text-center">Visuals & Effects</h4>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Text Scale</label>
+                    <ColorRow value={settings.textScale} min={0.5} max={3} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('textScale',v)} onCommit={(v:any)=>updateSetting('textScale',v)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Stroke Weight</label>
+                    <ColorRow value={settings.textStroke} min={0} max={5} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('textStroke',v)} onCommit={(v:any)=>updateSetting('textStroke',v)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Toolbar Opacity</label>
+                    <ColorRow value={settings.tileToolbarOpacity} min={0} max={1} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('tileToolbarOpacity',v)} onCommit={(v:any)=>updateSetting('tileToolbarOpacity',v)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Icon Scale</label>
+                    <ColorRow value={settings.tileIconScale} min={0.5} max={2.5} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('tileIconScale',v)} onCommit={(v:any)=>updateSetting('tileIconScale',v)} />
+                  </div>
                 </div>
               </div>
             )}

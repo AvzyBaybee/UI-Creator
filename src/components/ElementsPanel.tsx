@@ -138,6 +138,8 @@ interface ElementsPanelProps {
   onRename: (id: string, name: string) => void;
   onToggleVisibility: (id: string) => void;
   onCreateGroup: () => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
 export const ElementsPanel = ({ 
@@ -149,7 +151,9 @@ export const ElementsPanel = ({
   onDelete, 
   onRename, 
   onToggleVisibility,
-  onCreateGroup
+  onCreateGroup,
+  collapsed,
+  onToggleCollapse
 }: ElementsPanelProps) => {
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -235,9 +239,16 @@ export const ElementsPanel = ({
   const visibleIds = getVisibleIds();
 
   return (
-    <div className="w-64 bg-[#111111] border-r border-white/5 flex flex-col h-full overflow-hidden">
-      <div className="p-3 border-b border-white/5 flex items-center justify-between shrink-0">
-        <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-500">Elements</h2>
+    <div className={`bg-[#111111] border-r border-white/5 flex flex-col h-full overflow-hidden transition-all duration-300 relative ${collapsed ? 'w-12' : 'w-64'}`}>
+      <button 
+        onClick={onToggleCollapse}
+        className="absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-12 bg-[#111111] border border-white/10 rounded-full flex items-center justify-center text-zinc-500 hover:text-white z-50 shadow-xl"
+      >
+        {collapsed ? <ChevronRight size={14} /> : <ChevronRight size={14} className="rotate-180" />}
+      </button>
+
+      <div className={`p-3 border-b border-white/5 flex items-center justify-between shrink-0 ${collapsed ? 'flex-col gap-4' : ''}`}>
+        {!collapsed && <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-500">Elements</h2>}
         <button 
           onClick={onCreateGroup}
           className="p-1.5 hover:bg-white/5 rounded text-zinc-400 hover:text-white transition-colors"
@@ -247,26 +258,28 @@ export const ElementsPanel = ({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-2 custom-scrollbar">
-        <DndContext 
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext 
-            items={visibleIds}
-            strategy={verticalListSortingStrategy}
+      {!collapsed && (
+        <div className="flex-1 overflow-y-auto py-2 custom-scrollbar">
+          <DndContext 
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
           >
-            {renderItems()}
-          </SortableContext>
-        </DndContext>
-        
-        {elements.length === 0 && (
-          <div className="px-4 py-8 text-center">
-            <p className="text-xs text-zinc-600">No elements yet.<br/>Use the toolbar to create some.</p>
-          </div>
-        )}
-      </div>
+            <SortableContext 
+              items={visibleIds}
+              strategy={verticalListSortingStrategy}
+            >
+              {renderItems()}
+            </SortableContext>
+          </DndContext>
+          
+          {elements.length === 0 && (
+            <div className="px-4 py-8 text-center">
+              <p className="text-xs text-zinc-600">No elements yet.<br/>Use the toolbar to create some.</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

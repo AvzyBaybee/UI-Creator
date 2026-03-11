@@ -35,5 +35,8 @@ export const DEFAULT_SETTINGS = {
   showGrid: false,
   gridColor: '#ffffff',
   gridOpacity: 0.05,
-  tileBottomPadding: 12
+  tileBottomPadding: 12,
+  groupHandleHeight: 32,
+  groupHandleY: -12,
+  groupHandleWidthPercent: 100
 };
