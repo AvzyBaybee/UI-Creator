@@ -1,4 +1,4 @@
-export type ElementType = 'tile' | 'group' | 'color';
+export type ElementType = 'tile' | 'group' | 'color' | 'gradient';
 
 export interface BaseElement {
   id: string;
@@ -45,6 +45,22 @@ export interface ColorTileData extends BaseElement {
   highlightColor: string;
 }
 
-export type CanvasElement = TileData | GroupData | ColorTileData;
+export interface GradientTileData extends BaseElement {
+  type: 'gradient';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  gradientType: 'linear' | 'radial';
+  scale: number;
+  angle: number;
+  positionX: number;
+  positionY: number;
+  colorStops: { id: string, color: string, opacity: number, position: number }[];
+  highlightColor: string;
+  cornerRadius: number;
+}
 
-export type Tool = 'select' | 'tile' | 'group' | 'hand' | 'zoom';
+export type CanvasElement = TileData | GroupData | ColorTileData | GradientTileData;
+
+export type Tool = 'select' | 'tile' | 'group' | 'hand' | 'zoom' | 'gradient';
