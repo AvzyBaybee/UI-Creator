@@ -237,49 +237,60 @@ export const ElementsPanel = ({
   };
 
   const visibleIds = getVisibleIds();
+  const [isHovered, setIsHovered] = useState(false);
 
   return (
-    <div className={`bg-[#111111] border-r border-white/5 flex flex-col h-full overflow-hidden transition-all duration-300 relative ${collapsed ? 'w-12' : 'w-64'}`}>
-      <button 
-        onClick={onToggleCollapse}
-        className="absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-12 bg-[#111111] border border-white/10 rounded-full flex items-center justify-center text-zinc-500 hover:text-white z-50 shadow-xl"
-      >
-        {collapsed ? <ChevronRight size={14} /> : <ChevronRight size={14} className="rotate-180" />}
-      </button>
-
-      <div className={`p-3 border-b border-white/5 flex items-center justify-between shrink-0 ${collapsed ? 'flex-col gap-4' : ''}`}>
-        {!collapsed && <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-500">Elements</h2>}
-        <button 
-          onClick={onCreateGroup}
-          className="p-1.5 hover:bg-white/5 rounded text-zinc-400 hover:text-white transition-colors"
-          title="New Group"
-        >
-          <FolderPlus size={16} />
-        </button>
-      </div>
-
-      {!collapsed && (
-        <div className="flex-1 overflow-y-auto py-2 custom-scrollbar">
-          <DndContext 
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext 
-              items={visibleIds}
-              strategy={verticalListSortingStrategy}
-            >
-              {renderItems()}
-            </SortableContext>
-          </DndContext>
-          
-          {elements.length === 0 && (
-            <div className="px-4 py-8 text-center">
-              <p className="text-xs text-zinc-600">No elements yet.<br/>Use the toolbar to create some.</p>
-            </div>
-          )}
-        </div>
+    <div 
+      className={`h-full shrink-0 transition-all duration-300 relative z-40 ${collapsed ? 'w-0' : 'w-64'}`}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      {collapsed && (
+        <div className="absolute left-0 top-0 bottom-0 w-8 z-50 cursor-pointer" onClick={onToggleCollapse} />
       )}
+      
+      <div className={`bg-[#111111] border-r border-white/5 flex flex-col h-full overflow-hidden transition-all duration-300 absolute left-0 top-0 bottom-0 ${collapsed ? (isHovered ? 'w-2 translate-x-0' : 'w-2 -translate-x-full') : 'w-64 translate-x-0'}`}>
+        <button 
+          onClick={onToggleCollapse}
+          className={`absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-12 bg-[#111111] border border-white/10 rounded-full flex items-center justify-center text-zinc-500 hover:text-white z-50 shadow-xl transition-opacity duration-300 ${collapsed && !isHovered ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+        >
+          {collapsed ? <ChevronRight size={14} /> : <ChevronRight size={14} className="rotate-180" />}
+        </button>
+
+        <div className={`p-3 border-b border-white/5 flex items-center justify-between shrink-0 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
+          {!collapsed && <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-500">Elements</h2>}
+          <button 
+            onClick={onCreateGroup}
+            className="p-1.5 hover:bg-white/5 rounded text-zinc-400 hover:text-white transition-colors"
+            title="New Group"
+          >
+            <FolderPlus size={16} />
+          </button>
+        </div>
+
+        {!collapsed && (
+          <div className="flex-1 overflow-y-auto py-2 custom-scrollbar">
+            <DndContext 
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext 
+                items={visibleIds}
+                strategy={verticalListSortingStrategy}
+              >
+                {renderItems()}
+              </SortableContext>
+            </DndContext>
+            
+            {elements.length === 0 && (
+              <div className="px-4 py-8 text-center">
+                <p className="text-xs text-zinc-600">No elements yet.<br/>Use the toolbar to create some.</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

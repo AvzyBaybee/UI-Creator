@@ -38,7 +38,12 @@ export default function App() {
   const [interactingId, setInteractingId] = useState<string | null>(null); const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY); return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
   });
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); }, [settings]);
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [settings]);
   const updateSetting = (key: keyof typeof DEFAULT_SETTINGS, val: any) => setSettings(prev => ({ ...prev, [key]: val }));
   const [isSettingsOpen, setIsSettingsOpen] = useState(false); const [isGridSettingsOpen, setIsGridSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'color' | 'rect' | 'toolbar' | 'general' | 'groups'>('general');
@@ -199,10 +204,10 @@ export default function App() {
     if (tool === 'zoom') { setIsZooming(true); zoomStartRef.current = { clientX: e.evt.clientX, scale: stageScale, mousePointTo: worldPos }; }
     else if (tool === 'tile' && isBackground) {
       setIsDrawing(true); setNewTileStart(roundedWorldPos);
-      setCurrentDrawingTile({ id: `tile-temp`, name: '', type: 'tile', x: roundedWorldPos.x, y: roundedWorldPos.y, width: 0, height: 0, tileX: roundedWorldPos.x, tileY: roundedWorldPos.y, fill: '#808080', stroke: 'transparent', strokeWidth: 0, visible: true, depth: elements.length + 1, cornerRadius: 0, highlightColor: '#3b82f6' });
+      setCurrentDrawingTile({ id: `tile-temp`, name: '', type: 'tile', x: roundedWorldPos.x, y: roundedWorldPos.y, width: 0, height: 0, tileX: roundedWorldPos.x, tileY: roundedWorldPos.y, fill: '#808080', stroke: 'transparent', strokeWidth: 0, visible: true, depth: elements.length + 1, cornerRadius: 0, highlightColor: getDistinctColor() });
     } else if (tool === 'group' && isBackground) {
       setIsDrawingGroup(true); setNewTileStart(roundedWorldPos);
-      setCurrentDrawingGroup({ id: `group-temp`, name: '', type: 'group', tileX: roundedWorldPos.x, tileY: roundedWorldPos.y, tileWidth: 0, tileHeight: 0, color: getDistinctColor(), opacity: 1, expanded: true, visible: true, depth: elements.length + 1 });
+      setCurrentDrawingGroup({ id: `group-temp`, name: '', type: 'group', tileX: roundedWorldPos.x, tileY: roundedWorldPos.y, tileWidth: 0, tileHeight: 0, color: getDistinctColor(), opacity: settings.groupDefaultOpacity, expanded: true, visible: true, depth: elements.length + 1 });
     } else if (tool === 'select' && isBackground) { setIsSelecting(true); setSelectionStart(roundedWorldPos); setSelectionRect({ x: roundedWorldPos.x, y: roundedWorldPos.y, width: 0, height: 0 }); setSelectedIds([]); }
   };
 
@@ -460,7 +465,7 @@ export default function App() {
       tileWidth: 300,
       tileHeight: 300,
       color: getDistinctColor(),
-      opacity: 1,
+      opacity: settings.groupDefaultOpacity,
       expanded: true,
       visible: true,
       depth: elements.length + 1
@@ -579,7 +584,7 @@ export default function App() {
                 />
               );
             })}
-            {currentDrawingTile && <Rect {...currentDrawingTile} fill="rgba(255,255,255,0.05)" stroke="#ffffff" strokeWidth={1/stageScale} />}
+            {currentDrawingTile && <Rect {...currentDrawingTile} fill={hexToRgba(currentDrawingTile.highlightColor, 0.05)} stroke={currentDrawingTile.highlightColor} strokeWidth={1/stageScale} />}
             {currentDrawingGroup && <Rect x={currentDrawingGroup.tileX} y={currentDrawingGroup.tileY} width={currentDrawingGroup.tileWidth} height={currentDrawingGroup.tileHeight} fill={hexToRgba(currentDrawingGroup.color, 0.1)} stroke={currentDrawingGroup.color} strokeWidth={1/stageScale} />}
             {selectionRect && <Rect {...selectionRect} fill="rgba(59, 130, 246, 0.1)" stroke="#3b82f6" strokeWidth={1 / stageScale} dash={[5 / stageScale, 5 / stageScale]} />}
             {tiles.filter(t => t.colorTileId).map(t => {
@@ -673,18 +678,19 @@ export default function App() {
                 style={{ position: 'absolute', backgroundColor: hexToRgba(g.color, g.opacity ?? 1), border: `2px dashed ${hexToRgba(g.color, (g.opacity ?? 1) * 0.4)}`, borderRadius: 16, pointerEvents: 'none', zIndex: 10 }}>
                 
                 {/* Group Handle */}
-                <div className={`absolute origin-bottom pointer-events-auto cursor-grab active:cursor-grabbing transition-all duration-300 ease-out ${isSettingsOpen || isGridSettingsOpen ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 group-hover/node:opacity-100 group-hover/node:translate-y-0'}`} 
+                <div className={`absolute origin-bottom pointer-events-auto cursor-grab active:cursor-grabbing transition-opacity duration-300 ease-out ${isSettingsOpen || isGridSettingsOpen ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 group-hover/node:opacity-100 group-hover/node:translate-y-0'}`} 
                      style={{ 
                        width: (g.tileWidth * (settings.groupHandleWidthPercent / 100)) + 3.5, 
                        height: settings.groupHandleHeight, 
-                       left: (g.tileWidth * (1 - settings.groupHandleWidthPercent / 100)) / 2 - 1.75, 
+                       left: (g.tileWidth * (1 - settings.groupHandleWidthPercent / 100)) / 2 - 1.75 + (settings.groupHandleX || 0), 
                        bottom: `calc(100% + ${settings.groupHandleY}px)`, 
                        borderTopLeftRadius: 12, 
                        borderTopRightRadius: 12, 
                        backgroundColor: g.color, 
-                       zIndex: 30,
-                       maskImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='40' preserveAspectRatio='none'%3E%3Cpath d='M0 0h100v40H0z M35 15 h30 a5 5 0 0 1 0 10 h-30 a5 5 0 0 1 0 -10 z' fill-rule='evenodd'/%3E%3C/svg%3E")`,
-                       WebkitMaskImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='40' preserveAspectRatio='none'%3E%3Cpath d='M0 0h100v40H0z M35 15 h30 a5 5 0 0 1 0 10 h-30 a5 5 0 0 1 0 -10 z' fill-rule='evenodd'/%3E%3C/svg%3E")`,
+                       zIndex: -1,
+                       transition: isInteracting ? 'none' : 'opacity 0.3s ease-out, transform 0.3s ease-out',
+                       maskImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='40' preserveAspectRatio='none'%3E%3Cmask id='m'%3E%3Crect width='100' height='40' fill='white'/%3E%3Crect x='35' y='15' width='30' height='10' rx='${settings.handleCutoutRoundness || 0}' fill='black'/%3E%3C/mask%3E%3Crect width='100' height='40' fill='white' mask='url(%23m)'/%3E%3C/svg%3E")`,
+                       WebkitMaskImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='40' preserveAspectRatio='none'%3E%3Cmask id='m'%3E%3Crect width='100' height='40' fill='white'/%3E%3Crect x='35' y='15' width='30' height='10' rx='${settings.handleCutoutRoundness || 0}' fill='black'/%3E%3C/mask%3E%3Crect width='100' height='40' fill='white' mask='url(%23m)'/%3E%3C/svg%3E")`,
                        maskSize: '100% 100%',
                        maskRepeat: 'no-repeat'
                      }} 
@@ -694,7 +700,7 @@ export default function App() {
                   <TileNameInput textColor={theme.textColor} name={g.name} onChange={(e:any) => handleBulkRelativeUpdate(selectedIds.includes(g.id)?selectedIds:[g.id], () => ({ name: e.target.value }))} onCommit={(e:any) => handleBulkUpdateEnd(selectedIds.includes(g.id)?selectedIds:[g.id], { name: e.target.value })} textScale={settings.textScale} textStroke={settings.textStroke} showTooltip={showTooltip} hideTooltip={hideTooltip} />
                 </div>
                 <div className="absolute top-10 left-0 right-0 h-8 overflow-hidden z-10 transition-colors pointer-events-auto" style={{ backgroundColor: hexToRgba(theme.hex, settings.tileToolbarOpacity), borderBottom: `1px solid ${hexToRgba(theme.hex, 0.25)}` }}>
-                  <div className={`absolute inset-0 flex items-center justify-around px-4 transition-transform ${isSettingsOpen || isGridSettingsOpen ? 'translate-y-0' : '-translate-y-full group-hover/node:translate-y-0'}`}>
+                  <div className={`absolute inset-0 flex items-center justify-between px-4 transition-transform ${isSettingsOpen || isGridSettingsOpen ? 'translate-y-0' : '-translate-y-full group-hover/node:translate-y-0'}`}>
                     <button 
                       onPointerDown={e => e.stopPropagation()} 
                       onClick={() => handleUpdateEnd(g.id, { locked: !g.locked })}
@@ -703,15 +709,15 @@ export default function App() {
                       {g.locked ? <Lock size={14 * settings.textScale} /> : <Unlock size={14 * settings.textScale} />}
                     </button>
                     
-                    <div className="flex items-center gap-2 flex-1 justify-center max-w-[120px]">
-                      <input type="range" min="0" max="100" step="1" value={(g.opacity ?? 1) * 100} onMouseEnter={() => showTooltip(TOOLTIPS.opacity)} onMouseLeave={hideTooltip} onChange={(e) => { const v = parseFloat(e.target.value)/100; handleBulkRelativeUpdate(selectedIds.includes(g.id)?selectedIds:[g.id], el => ({ opacity: Math.max(0, Math.min(1, (el as any).opacity + (v - (g.opacity ?? 1)))) })); }} onBlur={(e) => pushToHistory(elementsRef.current)} onPointerDown={e => e.stopPropagation()} className="w-full" style={{ accentColor: g.color }} />
+                    <div className="flex items-center gap-2 flex-1 justify-center max-w-[100px]">
+                      <input type="range" min="0" max="100" step="1" value={((g as any).opacity ?? 1) * 100} onMouseEnter={() => showTooltip(TOOLTIPS.opacity)} onMouseLeave={hideTooltip} onChange={(e) => { const v = parseFloat(e.target.value)/100; handleBulkRelativeUpdate(selectedIds.includes(g.id)?selectedIds:[g.id], el => ({ opacity: v })); }} onBlur={(e) => pushToHistory(elementsRef.current)} onPointerDown={e => e.stopPropagation()} className="w-full" style={{ accentColor: g.color }} />
                     </div>
 
-                    <div className="flex items-center gap-3 shrink-0">
-                      <div className="relative rounded-full border border-white/20 cursor-pointer" style={{ backgroundColor: g.color, width: 16 * settings.textScale, height: 16 * settings.textScale }} onMouseEnter={() => showTooltip(TOOLTIPS.colorPicker)} onMouseLeave={hideTooltip}>
-                        <input type="color" value={g.color} onChange={(e) => handleBulkRelativeUpdate(selectedIds.includes(g.id)?selectedIds:[g.id], () => ({ color: e.target.value }))} onBlur={(e) => pushToHistory(elementsRef.current)} className="absolute inset-0 opacity-0 cursor-pointer" onPointerDown={e => e.stopPropagation()} />
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="relative rounded-full border border-white/20 cursor-pointer w-4 h-4 overflow-hidden" style={{ backgroundColor: g.color }} onMouseEnter={() => showTooltip(TOOLTIPS.colorPicker)} onMouseLeave={hideTooltip}>
+                        <input type="color" value={g.color} onChange={(e) => handleBulkRelativeUpdate(selectedIds.includes(g.id)?selectedIds:[g.id], () => ({ color: e.target.value }))} onBlur={(e) => pushToHistory(elementsRef.current)} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" onPointerDown={e => e.stopPropagation()} />
                       </div>
-                      <button onPointerDown={e => e.stopPropagation()} onMouseEnter={() => showTooltip(TOOLTIPS.delete)} onMouseLeave={hideTooltip} onClick={() => handleDeleteMultiple(selectedIds.includes(g.id) ? selectedIds : [g.id])} className="text-white/50 hover:text-red-400"><Trash2 size={14 * settings.textScale} /></button>
+                      <button onPointerDown={e => e.stopPropagation()} onMouseEnter={() => showTooltip(TOOLTIPS.delete)} onMouseLeave={hideTooltip} onClick={() => handleDeleteMultiple(selectedIds.includes(g.id) ? selectedIds : [g.id])} className="text-white/50 hover:text-red-400 p-1 relative z-20"><Trash2 size={14 * settings.textScale} /></button>
                     </div>
                   </div>
                 </div>
@@ -836,8 +842,8 @@ export default function App() {
                          borderTopRightRadius: 12, 
                          backgroundColor: (el as any).highlightColor || '#3b82f6', 
                          zIndex: -1,
-                         maskImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='40' preserveAspectRatio='none'%3E%3Cpath d='M0 0h100v40H0z M35 15 h30 a5 5 0 0 1 0 10 h-30 a5 5 0 0 1 0 -10 z' fill-rule='evenodd'/%3E%3C/svg%3E")`,
-                         WebkitMaskImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='40' preserveAspectRatio='none'%3E%3Cpath d='M0 0h100v40H0z M35 15 h30 a5 5 0 0 1 0 10 h-30 a5 5 0 0 1 0 -10 z' fill-rule='evenodd'/%3E%3C/svg%3E")`,
+                         maskImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='40' preserveAspectRatio='none'%3E%3Cmask id='m'%3E%3Crect width='100' height='40' fill='white'/%3E%3Crect x='35' y='15' width='30' height='10' rx='${settings.handleCutoutRoundness || 0}' fill='black'/%3E%3C/mask%3E%3Crect width='100' height='40' fill='white' mask='url(%23m)'/%3E%3C/svg%3E")`,
+                         WebkitMaskImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='40' preserveAspectRatio='none'%3E%3Cmask id='m'%3E%3Crect width='100' height='40' fill='white'/%3E%3Crect x='35' y='15' width='30' height='10' rx='${settings.handleCutoutRoundness || 0}' fill='black'/%3E%3C/mask%3E%3Crect width='100' height='40' fill='white' mask='url(%23m)'/%3E%3C/svg%3E")`,
                          maskSize: '100% 100%',
                          maskRepeat: 'no-repeat'
                        }} 
@@ -946,8 +952,12 @@ export default function App() {
             <input 
               type="checkbox" 
               checked={settings.showGrid} 
-              onChange={(e) => updateSetting('showGrid', e.target.checked)} 
-              className="w-4 h-4 rounded accent-blue-500 cursor-pointer" 
+              onChange={(e) => {
+                e.stopPropagation();
+                updateSetting('showGrid', e.target.checked);
+              }} 
+              onPointerDown={(e) => e.stopPropagation()}
+              className="w-4 h-4 rounded accent-blue-500 cursor-pointer pointer-events-auto" 
             />
             <ToolButton icon={<Grid size={settings.mainToolbarIconSize} />} label="Grid Settings" active={isGridSettingsOpen} onClick={() => setIsGridSettingsOpen(!isGridSettingsOpen)} />
           </div>
@@ -958,23 +968,25 @@ export default function App() {
       <AnimatePresence>
         {isGridSettingsOpen && (
           <motion.div 
+            drag
+            dragMomentum={false}
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-[#1a1a1a] border border-white/10 p-6 rounded-2xl shadow-2xl w-80 z-[60]"
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-[#1a1a1a] border border-white/10 p-6 rounded-2xl shadow-2xl w-80 z-[60] cursor-default"
           >
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-white font-bold flex items-center gap-2 text-xs uppercase tracking-widest"><Grid size={14} /> Grid Settings</h3>
-              <button onClick={() => setIsGridSettingsOpen(false)} className="text-zinc-500 hover:text-white"><X size={16} /></button>
+            <div className="flex items-center justify-between mb-6 cursor-move">
+              <h3 className="text-white font-bold flex items-center gap-2 text-xs uppercase tracking-widest w-full justify-center"><Grid size={14} /> Grid Settings</h3>
+              <button onClick={() => setIsGridSettingsOpen(false)} className="text-zinc-500 hover:text-white absolute right-6"><X size={16} /></button>
             </div>
             <div className="space-y-6">
               <div className="space-y-1">
-                <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Grid Cell Size</label>
+                <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Grid Cell Size (pixels)</label>
                 <ColorRow value={settings.gridSize} min={10} max={200} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('gridSize',v)} onCommit={(v:any)=>updateSetting('gridSize',v)} />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Grid Line Opacity</label>
-                <ColorRow value={settings.gridOpacity} min={0.01} max={1} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('gridOpacity',v)} onCommit={(v:any)=>updateSetting('gridOpacity',v)} />
+                <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Grid Line Opacity (%)</label>
+                <ColorRow value={settings.gridOpacity > 1 ? settings.gridOpacity : settings.gridOpacity * 100} min={1} max={100} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('gridOpacity', v / 100)} onCommit={(v:any)=>updateSetting('gridOpacity', v / 100)} />
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Grid Color</label>
@@ -1038,12 +1050,24 @@ export default function App() {
                     <ColorRow value={settings.groupHandleHeight} min={10} max={100} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('groupHandleHeight',v)} onCommit={(v:any)=>updateSetting('groupHandleHeight',v)} />
                   </div>
                   <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Horizontal Offset</label>
+                    <ColorRow value={settings.groupHandleX || 0} min={-100} max={100} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('groupHandleX',v)} onCommit={(v:any)=>updateSetting('groupHandleX',v)} />
+                  </div>
+                  <div className="space-y-1">
                     <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Vertical Offset</label>
                     <ColorRow value={settings.groupHandleY} min={-100} max={100} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('groupHandleY',v)} onCommit={(v:any)=>updateSetting('groupHandleY',v)} />
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Width Percentage</label>
                     <ColorRow value={settings.groupHandleWidthPercent} min={10} max={100} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('groupHandleWidthPercent',v)} onCommit={(v:any)=>updateSetting('groupHandleWidthPercent',v)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Default Opacity</label>
+                    <ColorRow value={settings.groupDefaultOpacity} min={0.1} max={1} precision={2} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('groupDefaultOpacity',v)} onCommit={(v:any)=>updateSetting('groupDefaultOpacity',v)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider block text-center">Handle Cutout Roundness</label>
+                    <ColorRow value={settings.handleCutoutRoundness || 0} min={0} max={10} precision={0} highlightColor="#3b82f6" onChange={(v:any)=>updateSetting('handleCutoutRoundness',v)} onCommit={(v:any)=>updateSetting('handleCutoutRoundness',v)} />
                   </div>
                 </div>
               </div>

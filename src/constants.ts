@@ -38,5 +38,8 @@ export const DEFAULT_SETTINGS = {
   tileBottomPadding: 12,
   groupHandleHeight: 32,
   groupHandleY: -12,
-  groupHandleWidthPercent: 100
+  groupHandleX: 0,
+  groupHandleWidthPercent: 100,
+  groupDefaultOpacity: 1,
+  handleCutoutRoundness: 0
 };
