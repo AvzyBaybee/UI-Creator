@@ -641,7 +641,7 @@ export default function App() {
             {tiles.sort((a,b)=>(a.depth||0)-(b.depth||0)).map((tile) => {
               const colorTile = elements.find(e => e.id === tile.colorTileId) as ColorTileData | undefined;
               const gradientTile = elements.find(e => e.id === tile.gradientTileId) as GradientTileData | undefined;
-              const fill = colorTile ? getColorHex(colorTile) : tile.fill;
+              const fill = gradientTile ? undefined : (colorTile ? getColorHex(colorTile) : tile.fill);
               const showHighlight = (selectedIds.includes(tile.id) || hoveredTileId === tile.id || (hoveredTileId && hoveredTileId === tile.colorTileId) || (hoveredTileId && hoveredTileId === tile.gradientTileId) || isSettingsOpen) && transformingTile?.id !== tile.id && interactingId !== tile.id;
               
               let gradientProps = {};
@@ -1221,14 +1221,7 @@ export default function App() {
                            left: -12, 
                            top: socketYOffset, 
                            transform: 'translateY(-50%)', 
-                           backgroundColor: (() => {
-                             const connectedId = (el as any).colorTileId || (el as any).gradientTileId;
-                             if (connectedId) {
-                               const source = elements.find(e => e.id === connectedId);
-                               return source ? (source as any).highlightColor : '#52525b';
-                             }
-                             return '#52525b';
-                           })()
+                           backgroundColor: (el as any).highlightColor || '#52525b'
                          }} 
                          onMouseEnter={() => { showTooltip(TOOLTIPS.socketInput); setHoveredInputSocketId(el.id); }} onMouseLeave={() => { hideTooltip(); setHoveredInputSocketId(null); }} 
                          onPointerDown={(e) => { e.stopPropagation(); if ((el as any).colorTileId || (el as any).gradientTileId) handleUpdateEnd(el.id, { colorTileId: undefined, gradientTileId: undefined }); }} />

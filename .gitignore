@@ -1,0 +1,8 @@
+node_modules
+Build Upload//
+UI-Creator//
+.env.example
+Jargon.txt
+metadata.json
+package-lock.json
+README.md

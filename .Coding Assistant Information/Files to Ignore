@@ -1,0 +1,7 @@
+# Coding Assistant Ignore File
+.env.example
+/
+Jargon.txt
+README.md
+metadata.json
+package-lock.json
